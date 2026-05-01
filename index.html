@@ -453,3 +453,212 @@ async function searchNotes() {
         res.innerHTML = `<div class="text-red-500">❌ Erreur</div>`;
     }
 }
+        // ========== STORIES AVEC IMAGES ET VIDÉOS (VERSION COMPAT CORRECTE) ==========
+        async function postStory(e) {
+            const file = e.target.files[0];
+            if (!file || !currentUser) {
+                showToast("❌ Connectez-vous d'abord");
+                return;
+            }
+            
+            const isVideo = file.type.startsWith('video/');
+            const isImage = file.type.startsWith('image/');
+            
+            if (!isVideo && !isImage) {
+                showToast("❌ Seules les images et vidéos sont acceptées");
+                return;
+            }
+            
+            // Limites
+            if (isVideo && file.size > 10 * 1024 * 1024) {
+                showToast("❌ Vidéo trop lourde (max 10 Mo)");
+                return;
+            }
+            if (isImage && file.size > 5 * 1024 * 1024) {
+                showToast("❌ Image trop lourde (max 5 Mo)");
+                return;
+            }
+            
+            showToast("⏳ Publication en cours...");
+            
+            try {
+                const userData = JSON.parse(localStorage.getItem('uts_user_data'));
+                const fileName = `${Date.now()}_${file.name}`;
+                const storageRef = storage.ref(`stories/${currentUser.uid}/${fileName}`);
+                
+                // Téléchargement version compat
+                const snapshot = await storageRef.put(file);
+                const url = await snapshot.ref.getDownloadURL();
+                
+                await db.collection("stories").add({
+                    mediaUrl: url,
+                    mediaType: isVideo ? 'video' : 'image',
+                    userName: userData?.prenom || "Anonyme",
+                    userId: currentUser.uid,
+                    date: firebase.firestore.FieldValue.serverTimestamp()
+                });
+                
+                showToast(`✨ Story ${isVideo ? 'vidéo' : 'photo'} publiée !`);
+            } catch (error) {
+                console.error(error);
+                showToast("❌ Erreur de connexion au stockage");
+            }
+            
+            e.target.value = '';
+        }
+
+        // Modal pour médias (images ET vidéos)
+        function openMediaModal(url, type) {
+            const modal = document.getElementById('mediaModal');
+            const content = document.getElementById('mediaContent');
+            if (type === 'video') {
+                content.innerHTML = `<video src="${url}" controls autoplay class="max-w-full max-h-[80vh] rounded-lg"></video>`;
+            } else {
+                content.innerHTML = `<img src="${url}" class="max-w-full max-h-[80vh] rounded-lg">`;
+            }
+            modal.classList.remove('hidden');
+        }
+
+        function closeMediaModal() {
+            const modal = document.getElementById('mediaModal');
+            const content = document.getElementById('mediaContent');
+            if (content) content.innerHTML = '';
+            if (modal) modal.classList.add('hidden');
+        }
+
+        // ========== IA ==========
+        async function telechargerIA() {
+            showToast("🤖 L'IA sera disponible dans la prochaine version");
+        }
+
+        async function askAI() {
+            const q = document.getElementById('aiQuery').value.trim();
+            if (!q) return;
+            const responseDiv = document.getElementById('aiResponse');
+            responseDiv.innerText = "🧠 Je réfléchis...";
+            setTimeout(() => {
+                responseDiv.innerText = "🤖 Version démo. L'IA complète arrive bientôt !";
+            }, 1000);
+            document.getElementById('aiQuery').value = "";
+        }
+
+        // ========== LISTE D'AMIS ==========
+        function updateFriendsList(users) {
+            const list = document.getElementById('friendsList');
+            if (!list) return;
+            const searchTerm = document.getElementById('searchFriend')?.value.toLowerCase() || '';
+            list.innerHTML = "";
+            users.forEach(userDoc => {
+                const u = userDoc.data();
+                if (currentUser && userDoc.id === currentUser.uid) return;
+                const fullName = `${u.prenom || ''} ${u.nom || ''}`.toLowerCase();
+                if (searchTerm && !fullName.includes(searchTerm)) return;
+                list.innerHTML += `
+                    <div class="flex items-center gap-4 p-4 hover:bg-gray-50 cursor-pointer" onclick="startChat('${userDoc.id}', '${(u.prenom || '').replace(/</g, '&lt;')} ${(u.nom || '').replace(/</g, '&lt;')}')">
+                        <img src="${u.avatar || 'https://cdn-icons-png.flaticon.com/512/149/149071.png'}" class="w-12 h-12 rounded-full object-cover border-2 border-green-500">
+                        <div class="flex-1">
+                            <h4 class="font-bold">${(u.prenom || '').replace(/</g, '&lt;')} ${(u.nom || '').replace(/</g, '&lt;')}</h4>
+                            <p class="text-[10px] text-gray-500">${(u.filiere || 'Étudiant').replace(/</g, '&lt;')}</p>
+                        </div>
+                        <i class="fas fa-comment-dots text-green-600"></i>
+                    </div>`;
+            });
+        }
+
+        // ========== CHARGEMENT DES DONNÉES ==========
+        function chargerDonneesGlobales() {
+            document.getElementById('load-more-btn').onclick = loadMoreArticles;
+            ajouterArticlesDemo();
+            
+            // Stories avec images ET vidéos
+            db.collection("stories").orderBy("date", "desc").limit(12).onSnapshot(snap => {
+                const container = document.getElementById('stories-container');
+                if (!container) return;
+                container.innerHTML = "";
+                snap.forEach(d => {
+                    const s = d.data();
+                    const isVideo = s.mediaType === 'video';
+                    container.innerHTML += `
+                        <div class="flex-shrink-0 w-16 text-center cursor-pointer" onclick="openMediaModal('${s.mediaUrl}', '${s.mediaType}')">
+                            <div class="w-14 h-14 rounded-full border-2 border-green-500 p-0.5 relative">
+                                ${isVideo ? '<i class="fas fa-play absolute inset-0 m-auto text-white text-xs bg-black/50 rounded-full w-5 h-5 flex items-center justify-center"></i>' : ''}
+                                <img src="${s.mediaUrl}" class="w-full h-full rounded-full object-cover" onerror="this.src='https://cdn-icons-png.flaticon.com/512/149/149071.png'">
+                            </div>
+                            <span class="text-[9px] mt-1 block truncate">${(s.userName || '').replace(/</g, '&lt;')}</span>
+                        </div>`;
+                });
+            });
+
+            // Liste des utilisateurs
+            db.collection("users").orderBy("date", "desc").onSnapshot(snap => {
+                const users = [];
+                snap.forEach(u => users.push(u));
+                updateFriendsList(users);
+            });
+            
+            // Recherche d'amis
+            const searchInput = document.getElementById('searchFriend');
+            if (searchInput) {
+                searchInput.addEventListener('input', () => {
+                    db.collection("users").orderBy("date", "desc").onSnapshot(snap => {
+                        const users = [];
+                        snap.forEach(u => users.push(u));
+                        updateFriendsList(users);
+                    });
+                });
+            }
+        }
+
+        // ========== AUTHENTIFICATION ==========
+        auth.onAuthStateChanged(async (user) => {
+            if (!user) {
+                await auth.signInAnonymously();
+            } else {
+                currentUser = user;
+                const saved = localStorage.getItem('uts_user_data');
+                if (saved) updateProfileUI(JSON.parse(saved));
+                chargerDonneesGlobales();
+            }
+        });
+
+        // ========== FONCTIONS COMPLÉMENTAIRES ==========
+        // Anti-XSS pour les textes
+        function sanitizeText(str) {
+            if (!str) return '';
+            return str.replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        }
+
+        // ========== EXPOSER LES FONCTIONS GLOBALEMENT ==========
+        window.switchView = switchView;
+        window.openSidebar = openSidebar;
+        window.closeSidebar = closeSidebar;
+        window.openImageModal = openImageModal;
+        window.closeImageModal = closeImageModal;
+        window.openMediaModal = openMediaModal;
+        window.closeMediaModal = closeMediaModal;
+        window.handleLogout = handleLogout;
+        window.installApp = installApp;
+        window.startChat = startChat;
+        window.sendMessage = sendMessage;
+        window.closeChat = closeChat;
+        window.registerUser = registerUser;
+        window.previewImage = previewImage;
+        window.searchNotes = searchNotes;
+        window.postStory = postStory;
+        window.telechargerIA = telechargerIA;
+        window.askAI = askAI;
+        window.showToast = showToast;
+        window.sanitizeText = sanitizeText;
+
+        // ========== DÉMARRAGE ==========
+        window.onload = () => {
+            console.log("🚀 Application UTS Social démarrée");
+            if (!localStorage.getItem('uts_registered')) {
+                switchView('profile');
+            } else {
+                switchView('home');
+            }
+        };
+    </script>
+</body>
+</html>
