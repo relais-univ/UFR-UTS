@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>UTS Social - Officiel</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <link rel="manifest" href="manifest.json">
+    <link rel="apple-touch-icon" sizes="192x192" href="logo-192.png">
+    <link rel="icon" type="image/png" sizes="512x512" href="logo-512.png">
+    <script src="https://cdn.jsdelivr.net/npm/browser-image-compression@2.0.2/dist/browser-image-compression.min.js"></script>
+    
+    <!-- Import map pour les modules -->
+    <script type="importmap">
+        {
+            "imports": {
+                "@huggingface/transformers": "https://unpkg.com/@huggingface/transformers@3.3.3/dist/transformers.min.js",
+                "firebase/app": "https://www.gstatic.com/firebasejs/11.0.0/firebase-app.js",
+                "firebase/firestore": "https://www.gstatic.com/firebasejs/11.0.0/firebase-firestore.js",
+                "firebase/auth": "https://www.gstatic.com/firebasejs/11.0.0/firebase-auth.js",
+                "firebase/storage": "https://www.gstatic.com/firebasejs/11.0.0/firebase-storage.js"
+            }
+        }
+    </script>
+    
+    <style>
+        /* Tes styles ici (inchangés) */
+        .uts-green { background-color: #008751; }
+        .active-nav { color: #008751 !important; border-top: 3px solid #008751; }
+        .view-section { display: none; }
+        .view-section.active { display: block; animation: fadeIn 0.3s ease; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+        .card-shadow { box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.1); }
+        .input-pro { width: 100%; background: #f3f4f6; border-radius: 15px; padding: 12px 15px; border: 2px solid transparent; outline: none; transition: 0.3s; font-size: 14px; }
+        .input-pro:focus { border-color: #008751; background: white; }
+        .uts-logo { background: white; }
+        .uts-logo span:nth-child(1) { color: #EF4444; }
+        .uts-logo span:nth-child(2) { color: #EAB308; }
+        .uts-logo span:nth-child(3) { color: #22C55E; }
+        .no-scrollbar::-webkit-scrollbar { display: none; }
+        
+        #uts-toast { 
+            position: fixed; bottom: 100px; left: 50%; transform: translateX(-50%) translateY(100px); 
+            background: #1f2937; color: white; padding: 12px 24px; border-radius: 50px; 
+            font-weight: 600; font-size: 13px; z-index: 1000; transition: all 0.4s ease; 
+            opacity: 0; display: flex; align-items: center; gap: 10px; box-shadow: 0 10px 15px rgba(0,0,0,0.3);
+        }
+        #uts-toast.show { transform: translateX(-50%) translateY(0); opacity: 1; }
+
+        .sidebar { position: fixed; top: 0; left: -280px; width: 280px; height: 100%; background: white; z-index: 300; transition: left 0.3s ease; box-shadow: 2px 0 10px rgba(0,0,0,0.1); overflow-y: auto; }
+        .sidebar.open { left: 0; }
+        .sidebar-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 299; display: none; }
+        .sidebar-overlay.open { display: block; }
+        .menu-item { padding: 12px 20px; border-bottom: 1px solid #e5e7eb; cursor: pointer; transition: background 0.2s; }
+        .menu-item:hover { background: #f3f4f6; }
+        
+        .chat-message { animation: messageSlide 0.2s ease; }
+        @keyframes messageSlide { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+        .load-more-btn { transition: all 0.2s; }
+        .load-more-btn:active { transform: scale(0.98); }
+        
+        .media-modal-content video, .media-modal-content img { max-width: 100%; max-height: 80vh; border-radius: 16px; }
+    </style>
+</head>
+<body class="bg-gray-100 font-sans pb-24">
+    <!-- LE RESTE DE TON HTML EST IDENTIQUE (header, main, nav, etc.) -->
+    <!-- Je garde tout le HTML que tu avais déjà -->
