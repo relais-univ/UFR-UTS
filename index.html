@@ -193,4 +193,263 @@
         <button onclick="closeMediaModal()" class="absolute top-4 right-4 text-white text-3xl">&times;</button>
     </div>
 
-    <script>
+    <script>// Configuration Firebase
+const firebaseConfig = {
+    apiKey: "AIzaSyDXmjqF1DvqF0k8-YCUY-MHjyxRf6CBU78",
+    authDomain: "uts-e6211.firebaseapp.com",
+    projectId: "uts-e6211",
+    storageBucket: "uts-e6211.firebasestorage.app",
+    messagingSenderId: "520201058732",
+    appId: "1:520201058732:web:d2beaf37f46f7cd6daa209"
+};
+
+// Initialisation Firebase
+firebase.initializeApp(firebaseConfig);
+const db = firebase.firestore();
+const auth = firebase.auth();
+const storage = firebase.storage();
+
+// Variables
+let currentUser = null;
+let activeChatId = null;
+let unsubscribeChat = null;
+let lastArticleDoc = null;
+let isLoadingMore = false;
+let allArticlesLoaded = false;
+
+// ========== FONCTIONS DE NAVIGATION ==========
+function switchView(v) {
+    console.log("🔁 Navigation vers:", v);
+    
+    document.querySelectorAll('.view-section').forEach(s => s.classList.remove('active'));
+    const target = document.getElementById('view-' + v);
+    if (target) target.classList.add('active');
+    
+    document.querySelectorAll('.nav-btn').forEach(btn => {
+        btn.classList.remove('active-nav');
+        btn.classList.add('text-gray-400');
+    });
+    
+    const activeBtn = document.getElementById('nav-' + v);
+    if (activeBtn) {
+        activeBtn.classList.add('active-nav');
+        activeBtn.classList.remove('text-gray-400');
+    }
+    
+    if (v === 'home') loadInitialFeed();
+}
+
+function showToast(m) {
+    const t = document.getElementById('uts-toast');
+    const msg = document.getElementById('toast-message');
+    if (t && msg) {
+        msg.innerText = m;
+        t.classList.add('show');
+        setTimeout(() => t.classList.remove('show'), 3000);
+    }
+}
+
+function openSidebar() {
+    document.getElementById('sidebar')?.classList.add('open');
+    document.getElementById('sidebarOverlay')?.classList.add('open');
+}
+
+function closeSidebar() {
+    document.getElementById('sidebar')?.classList.remove('open');
+    document.getElementById('sidebarOverlay')?.classList.remove('open');
+}
+
+function openImageModal(src) {
+    const modal = document.getElementById('imageModal');
+    const img = document.getElementById('modalImage');
+    if (modal && img) {
+        img.src = src;
+        modal.classList.remove('hidden');
+    }
+}
+
+function closeImageModal() {
+    document.getElementById('imageModal')?.classList.add('hidden');
+}
+
+function handleLogout() {
+    if (confirm("Supprimer vos données ?")) {
+        localStorage.clear();
+        location.reload();
+    }
+}
+
+function installApp() {
+    showToast("📱 Utilisez 'Ajouter à l'écran d'accueil'");
+}
+
+// ========== SCROLL INFINI ==========
+async function loadMoreArticles() {
+    if (isLoadingMore || allArticlesLoaded) return;
+    isLoadingMore = true;
+    
+    let q;
+    if (lastArticleDoc) {
+        q = db.collection("articles").orderBy("createdAt", "desc").startAfter(lastArticleDoc).limit(5);
+    } else {
+        q = db.collection("articles").orderBy("createdAt", "desc").limit(5);
+    }
+    
+    const snap = await q.get();
+    if (snap.empty) {
+        allArticlesLoaded = true;
+        document.getElementById('load-more-container')?.classList.add('hidden');
+        isLoadingMore = false;
+        return;
+    }
+    
+    lastArticleDoc = snap.docs[snap.docs.length - 1];
+    const feed = document.getElementById('news-feed');
+    
+    snap.forEach(doc => {
+        const data = doc.data();
+        feed.innerHTML += `
+            <div class="bg-white rounded-3xl overflow-hidden shadow-sm border border-gray-100 mb-4">
+                <div class="p-5">
+                    <h3 class="font-black text-lg text-gray-800 mb-1">${data.title || 'Article'}</h3>
+                    <p class="text-sm text-gray-600 leading-relaxed">${(data.content || '').replace(/\n/g, '<br>')}</p>
+                </div>
+            </div>`;
+    });
+    
+    if (snap.docs.length < 5) allArticlesLoaded = true;
+    document.getElementById('load-more-container')?.classList.toggle('hidden', allArticlesLoaded);
+    isLoadingMore = false;
+}
+
+function loadInitialFeed() {
+    lastArticleDoc = null;
+    allArticlesLoaded = false;
+    document.getElementById('news-feed').innerHTML = '';
+    loadMoreArticles();
+}
+
+// ========== AJOUTER ARTICLES DE DÉMO ==========
+async function ajouterArticlesDemo() {
+    const snap = await db.collection("articles").limit(1).get();
+    if (!snap.empty) return;
+    
+    const articles = [
+        { title: "📢 Rentrée universitaire 2025", content: "La rentrée académique est fixée au 1er octobre 2025.", createdAt: new Date() },
+        { title: "🏆 Conférence sur l'entrepreneuriat", content: "L'Université Thomas Sankara organise une conférence le 15 mai.", createdAt: new Date() },
+        { title: "📚 Bourses d'études disponibles", content: "Appel à candidatures pour les bourses d'excellence.", createdAt: new Date() },
+        { title: "💻 Hackathon UTS 2025", content: "Participez au plus grand hackathon de l'université !", createdAt: new Date() },
+        { title: "🎓 Cérémonie de remise des diplômes", content: "La cérémonie aura lieu le 20 décembre.", createdAt: new Date() }
+    ];
+    
+    for (const article of articles) {
+        await db.collection("articles").add(article);
+    }
+    loadInitialFeed();
+}
+
+// ========== CHAT ==========
+function startChat(amiId, amiNom) {
+    activeChatId = amiId;
+    document.getElementById('chatPartnerName').innerText = amiNom;
+    document.getElementById('chatWindow').classList.remove('hidden');
+    const roomId = [currentUser.uid, amiId].sort().join('_');
+    if (unsubscribeChat) unsubscribeChat();
+    unsubscribeChat = db.collection("messages").where("roomId", "==", roomId).orderBy("date", "asc").onSnapshot(snap => {
+        const box = document.getElementById('chatMessages');
+        if (!box) return;
+        box.innerHTML = "";
+        snap.forEach(doc => {
+            const m = doc.data();
+            const isMe = m.senderId === currentUser.uid;
+            const safeText = (m.text || '').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+            box.innerHTML += `<div class="max-w-[80%] chat-message ${isMe ? 'self-end bg-green-600 text-white rounded-l-2xl rounded-tr-2xl' : 'self-start bg-white border rounded-r-2xl rounded-tl-2xl shadow-sm'} p-3 text-sm">${safeText}</div>`;
+        });
+        box.scrollTo({ top: box.scrollHeight, behavior: 'smooth' });
+    });
+}
+
+async function sendMessage() {
+    const input = document.getElementById('chatInput');
+    const text = input.value.trim();
+    if (!text || !activeChatId) return;
+    const roomId = [currentUser.uid, activeChatId].sort().join('_');
+    input.value = "";
+    await db.collection("messages").add({ roomId, senderId: currentUser.uid, text, date: new Date() });
+}
+
+function closeChat() {
+    document.getElementById('chatWindow').classList.add('hidden');
+    if (unsubscribeChat) unsubscribeChat();
+}
+
+// ========== PROFIL ==========
+async function registerUser() {
+    const nom = document.getElementById('reg-nom').value.trim();
+    const prenom = document.getElementById('reg-prenom').value.trim();
+    const filiere = document.getElementById('reg-filiere').value.trim();
+    if (!nom || !prenom) return showToast("⚠️ Nom/Prénom requis");
+    
+    const userData = { nom, prenom, filiere, avatar: "", date: new Date() };
+    localStorage.setItem('uts_user_data', JSON.stringify(userData));
+    localStorage.setItem('uts_registered', 'true');
+    await db.collection("users").doc(currentUser.uid).set(userData);
+    updateProfileUI(userData);
+    showToast("✅ Profil enregistré !");
+    switchView('home');
+}
+
+async function previewImage(e, instant = false) {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = async (ev) => {
+        const url = ev.target.result;
+        document.getElementById('temp-avatar').src = url;
+        document.getElementById('user-img').src = url;
+        if (instant && currentUser) {
+            const data = JSON.parse(localStorage.getItem('uts_user_data'));
+            data.avatar = url;
+            await db.collection("users").doc(currentUser.uid).set(data);
+            localStorage.setItem('uts_user_data', JSON.stringify(data));
+            showToast("📸 Photo mise à jour !");
+        }
+    };
+    reader.readAsDataURL(file);
+}
+
+function updateProfileUI(data) {
+    document.getElementById('register-ui').classList.add('hidden');
+    document.getElementById('profile-ui').classList.remove('hidden');
+    document.getElementById('user-full-name').innerText = `${data.prenom} ${data.nom}`;
+    document.getElementById('user-sub').innerText = data.filiere;
+    if (data.avatar) document.getElementById('user-img').src = data.avatar;
+}
+
+// ========== NOTES ==========
+async function searchNotes() {
+    const ine = document.getElementById('matSearch').value.trim();
+    const res = document.getElementById('resultArea');
+    if (!ine) return showToast("Entrez votre INE");
+    res.innerHTML = '<div class="text-center text-gray-500">🔍 Recherche...</div>';
+    try {
+        const snap = await db.collection("notes").where("ine", "==", ine).get();
+        if (snap.empty) {
+            res.innerHTML = `<div class="bg-blue-50 p-6 rounded-2xl text-center"><p class="font-bold text-blue-700">📭 Aucune note pour ${ine}</p></div>`;
+            return;
+        }
+        let html = `<div class="space-y-4">`;
+        snap.forEach(doc => {
+            const n = doc.data();
+            html += `<div class="bg-white rounded-2xl border p-4">
+                        <div class="font-bold text-green-800">📚 ${n.matiere || "Sans matière"}</div>
+                        <div class="text-2xl font-black text-green-700">${n.note || "?"}/20</div>
+                        ${n.commentaire ? `<div class="text-sm italic">“${n.commentaire}”</div>` : ''}
+                    </div>`;
+        });
+        html += `</div>`;
+        res.innerHTML = html;
+    } catch (error) {
+        res.innerHTML = `<div class="text-red-500">❌ Erreur</div>`;
+    }
+}
