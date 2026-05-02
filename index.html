@@ -1,0 +1,783 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>UTS Social - Officiel</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <link rel="manifest" href="manifest.json">
+    <link rel="apple-touch-icon" sizes="192x192" href="logo-192.png">
+    <link rel="icon" type="image/png" sizes="512x512" href="logo-512.png">
+    <script src="https://cdn.jsdelivr.net/npm/browser-image-compression@2.0.2/dist/browser-image-compression.min.js"></script>
+    
+    <!-- Firebase SDK (version classique sans module) -->
+    <script src="https://www.gstatic.com/firebasejs/11.0.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/11.0.0/firebase-firestore-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/11.0.0/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/11.0.0/firebase-storage-compat.js"></script>
+    
+    <style>
+        .uts-green { background-color: #008751; }
+        .active-nav { color: #008751 !important; border-top: 3px solid #008751; }
+        .view-section { display: none; }
+        .view-section.active { display: block; animation: fadeIn 0.3s ease; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+        .card-shadow { box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.1); }
+        .input-pro { width: 100%; background: #f3f4f6; border-radius: 15px; padding: 12px 15px; border: 2px solid transparent; outline: none; transition: 0.3s; font-size: 14px; }
+        .input-pro:focus { border-color: #008751; background: white; }
+        .uts-logo { background: white; }
+        .uts-logo span:nth-child(1) { color: #EF4444; }
+        .uts-logo span:nth-child(2) { color: #EAB308; }
+        .uts-logo span:nth-child(3) { color: #22C55E; }
+        .no-scrollbar::-webkit-scrollbar { display: none; }
+        
+        #uts-toast { 
+            position: fixed; bottom: 100px; left: 50%; transform: translateX(-50%) translateY(100px); 
+            background: #1f2937; color: white; padding: 12px 24px; border-radius: 50px; 
+            font-weight: 600; font-size: 13px; z-index: 1000; transition: all 0.4s ease; 
+            opacity: 0; display: flex; align-items: center; gap: 10px; box-shadow: 0 10px 15px rgba(0,0,0,0.3);
+        }
+        #uts-toast.show { transform: translateX(-50%) translateY(0); opacity: 1; }
+
+        .sidebar { position: fixed; top: 0; left: -280px; width: 280px; height: 100%; background: white; z-index: 300; transition: left 0.3s ease; box-shadow: 2px 0 10px rgba(0,0,0,0.1); overflow-y: auto; }
+        .sidebar.open { left: 0; }
+        .sidebar-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 299; display: none; }
+        .sidebar-overlay.open { display: block; }
+        .menu-item { padding: 12px 20px; border-bottom: 1px solid #e5e7eb; cursor: pointer; transition: background 0.2s; }
+        .menu-item:hover { background: #f3f4f6; }
+        
+        .chat-message { animation: messageSlide 0.2s ease; }
+        @keyframes messageSlide { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+        .load-more-btn { transition: all 0.2s; }
+        .load-more-btn:active { transform: scale(0.98); }
+        
+        /* Style pour le lecteur vidéo dans le modal */
+        .media-modal-content video, .media-modal-content img { max-width: 100%; max-height: 80vh; border-radius: 16px; }
+    </style>
+</head>
+<body class="bg-gray-100 font-sans pb-24">
+
+    <div id="uts-toast"><i class="fas fa-info-circle text-yellow-400"></i><span id="toast-message"></span></div>
+
+    <div id="sidebarOverlay" class="sidebar-overlay" onclick="closeSidebar()"></div>
+    <div id="sidebar" class="sidebar">
+        <div class="uts-green text-white p-4 text-center font-bold">Menu UTS</div>
+        <div class="menu-item" onclick="closeSidebar(); switchView('home')"><i class="fas fa-home w-6"></i> Accueil</div>
+        <div class="menu-item" onclick="closeSidebar(); switchView('search')"><i class="fas fa-robot w-6"></i> Assistant IA</div>
+        <div class="menu-item" onclick="closeSidebar(); switchView('notes')"><i class="fas fa-graduation-cap w-6"></i> Mes notes</div>
+        <div class="menu-item" onclick="closeSidebar(); switchView('community')"><i class="fas fa-users w-6"></i> Amis</div>
+        <div class="menu-item" onclick="closeSidebar(); switchView('profile')"><i class="fas fa-user-circle w-6"></i> Mon profil</div>
+        <div class="menu-item" onclick="closeSidebar(); telechargerIA()"><i class="fas fa-download w-6"></i> 📥 Télécharger l'IA</div>
+        <div class="menu-item" onclick="closeSidebar(); handleLogout()"><i class="fas fa-sign-out-alt w-6"></i> Déconnexion</div>
+    </div>
+
+    <header class="uts-green text-white p-4 sticky top-0 z-50 shadow-md flex justify-between items-center">
+        <div class="flex items-center gap-2">
+            <i class="fas fa-bars text-xl cursor-pointer hover:text-green-200" onclick="openSidebar()"></i>
+            <div class="uts-logo w-10 h-10 bg-white rounded-full flex items-center justify-center text-xl font-bold"><span>U</span><span>T</span><span>S</span></div>
+            <div>
+                <h1 id="pageTitle" class="text-lg font-bold">Fil d'actualité</h1>
+                <div class="flex items-center gap-1 text-xs"><i id="statusIcon" class="fas fa-circle text-green-400 text-[8px]"></i><span id="statusText" class="text-green-200 text-[10px]">En ligne</span></div>
+            </div>
+        </div>
+        <div class="flex gap-4">
+            <i class="fas fa-bell text-xl"></i>
+            <i class="fas fa-paper-plane text-xl cursor-pointer" onclick="switchView('community')"></i>
+            <button onclick="installApp()" id="installBtn" class="text-sm bg-white text-green-700 px-3 py-1 rounded-full font-bold hover:bg-green-100 transition shadow flex items-center gap-1">⬇️ App</button>
+        </div>
+    </header>
+
+    <main class="max-w-md mx-auto p-4">
+        <section id="view-home" class="view-section active space-y-4">
+            <div class="bg-white rounded-3xl p-6 shadow-sm border border-gray-100 text-center">
+                <img src="thomas-sankara.jpg" alt="Thomas Sankara" class="w-40 h-40 rounded-full mx-auto object-cover border-4 border-green-500 shadow-md cursor-pointer hover:scale-105 transition-transform duration-300" onclick="openImageModal(this.src)">
+                <h3 class="font-bold text-green-700 text-xl mt-3">Thomas Sankara</h3>
+                <p class="text-sm text-gray-600 italic mt-1">"Refuse désormais de mourir d'ignorance, de faim et de soif"</p>
+            </div>
+            <div id="news-feed" class="space-y-4 mt-4 pb-4"></div>
+            <div id="load-more-container" class="text-center hidden">
+                <button id="load-more-btn" class="bg-gray-200 hover:bg-gray-300 text-gray-700 px-6 py-2 rounded-full text-sm font-bold transition">Voir plus ⬇️</button>
+            </div>
+        </section>
+
+        <section id="view-search" class="view-section">
+            <div class="bg-white p-6 rounded-[35px] card-shadow">
+                <h2 class="text-xl font-black mb-4 text-green-700 flex items-center gap-2"><i class="fas fa-robot"></i> Assistant UTS</h2>
+                <div class="relative mb-4"><input type="text" id="aiQuery" placeholder="Pose ta question ici..." class="input-pro pr-12" onkeypress="if(event.key==='Enter') askAI()"><button onclick="askAI()" class="absolute right-3 top-2 text-green-700"><i class="fas fa-paper-plane text-xl"></i></button></div>
+                <div id="aiDownloadContainer" class="hidden mb-4">
+                    <div class="flex justify-between text-[10px] font-bold text-green-700 mb-1"><span id="dlStatus">Téléchargement...</span><span id="dlPercent">0%</span></div>
+                    <div class="w-full bg-gray-200 rounded-full h-2 overflow-hidden"><div id="aiProgressBar" class="uts-green h-full" style="width: 0%"></div></div>
+                </div>
+                <div id="aiResponse" class="p-4 bg-gray-50 rounded-2xl min-h-[180px] text-sm text-gray-700">🤖 Bonjour ! Pose-moi n'importe quelle question !</div>
+            </div>
+        </section>
+
+        <section id="view-notes" class="view-section">
+            <div class="bg-white p-6 rounded-[35px] card-shadow text-center">
+                <h2 class="text-xl font-black mb-4 text-green-700">Résultats Académiques</h2>
+                <input type="text" id="matSearch" placeholder="Votre INE" class="input-pro text-center mb-4">
+                <button onclick="searchNotes()" class="w-full uts-green text-white py-4 rounded-2xl font-bold">VÉRIFIER</button>
+                <div id="resultArea" class="mt-4"></div>
+            </div>
+        </section>
+
+        <section id="view-community" class="view-section">
+            <div class="flex gap-4 overflow-x-auto no-scrollbar mb-4 bg-white p-4 rounded-[25px] border shadow-sm">
+                <div class="flex-shrink-0 w-16 text-center" onclick="document.getElementById('storyInput').click()">
+                    <div class="w-14 h-14 rounded-full border-2 border-dashed border-green-500 flex items-center justify-center bg-gray-50">
+                        <i class="fas fa-plus text-green-500"></i>
+                    </div>
+                    <span class="text-[9px] mt-1 block font-bold">Story</span>
+                    <input type="file" id="storyInput" class="hidden" accept="image/*,video/*" onchange="postStory(event)">
+                </div>
+                <div id="stories-container" class="flex gap-4"></div>
+            </div>
+
+            <div class="bg-white rounded-[30px] overflow-hidden border shadow-sm">
+                <div class="p-4 border-b bg-gray-50"><div class="relative"><input type="text" id="searchFriend" placeholder="Rechercher un ami..." class="input-pro pl-10"><i class="fas fa-search absolute left-4 top-4 text-gray-400"></i></div></div>
+                <div id="friendsList" class="min-h-[400px] divide-y divide-gray-50"></div>
+            </div>
+        </section>
+
+        <section id="view-profile" class="view-section">
+            <div id="register-ui" class="bg-white p-6 rounded-[35px] card-shadow space-y-4 text-center">
+                <div class="relative w-24 h-24 mx-auto mb-2"><img id="temp-avatar" src="https://cdn-icons-png.flaticon.com/512/149/149071.png" class="w-full h-full rounded-full object-cover"><label class="absolute bottom-0 right-0 w-8 h-8 uts-green text-white rounded-full flex items-center justify-center cursor-pointer border-2 border-white"><i class="fas fa-camera text-xs"></i><input type="file" class="hidden" onchange="previewImage(event)"></label></div>
+                <div class="grid grid-cols-2 gap-3"><input type="text" id="reg-nom" placeholder="Nom" class="input-pro"><input type="text" id="reg-prenom" placeholder="Prénom" class="input-pro"></div>
+                <input type="text" id="reg-filiere" placeholder="Filière" class="input-pro"><button onclick="registerUser()" class="w-full uts-green text-white py-4 rounded-2xl font-black">S'ENREGISTRER</button>
+            </div>
+            <div id="profile-ui" class="hidden bg-white p-8 rounded-[40px] card-shadow text-center">
+                <div class="relative w-32 h-32 mx-auto mb-4">
+                    <img id="user-img" src="" class="w-full h-full rounded-full border-4 border-green-500 object-cover">
+                    <label class="absolute bottom-0 right-0 w-10 h-10 uts-green text-white rounded-full flex items-center justify-center cursor-pointer border-2 border-white shadow-lg">
+                        <i class="fas fa-pen text-xs"></i><input type="file" class="hidden" onchange="previewImage(event, true)">
+                    </label>
+                </div>
+                <h2 id="user-full-name" class="text-2xl font-black"></h2>
+                <p id="user-sub" class="text-gray-500 text-sm mt-1"></p>
+                <button onclick="handleLogout()" class="mt-6 text-red-500 font-bold text-xs uppercase">Se déconnecter</button>
+            </div>
+        </section>
+    </main>
+
+    <div id="chatWindow" class="hidden fixed inset-0 z-[150] bg-white flex flex-col animate-fadeIn">
+        <header class="uts-green text-white p-4 flex items-center gap-3 shadow-md">
+            <i class="fas fa-arrow-left cursor-pointer text-xl" onclick="closeChat()"></i>
+            <div class="flex-1">
+                <h3 id="chatPartnerName" class="font-bold text-sm">Ami</h3>
+                <p class="text-[10px] opacity-80">En ligne</p>
+            </div>
+        </header>
+        <div id="chatMessages" class="flex-1 overflow-y-auto p-4 space-y-3 bg-gray-50 flex flex-col"></div>
+        <div class="p-3 bg-white border-t flex items-center gap-2">
+            <input type="text" id="chatInput" placeholder="Écrire un message..." class="input-pro flex-1" onkeypress="if(event.key==='Enter') sendMessage()">
+            <button onclick="sendMessage()" class="uts-green text-white w-10 h-10 rounded-full flex items-center justify-center"><i class="fas fa-paper-plane"></i></button>
+        </div>
+    </div>
+
+    <nav class="fixed bottom-0 left-0 right-0 bg-white/90 backdrop-blur-md border-t p-2 flex justify-around shadow-2xl z-50">
+        <button onclick="switchView('home')" id="nav-home" class="nav-btn flex flex-col items-center p-2 active-nav"><i class="fas fa-home text-xl"></i><span class="text-[9px] font-bold mt-1">Accueil</span></button>
+        <button onclick="switchView('search')" id="nav-search" class="nav-btn flex flex-col items-center p-2 text-gray-400"><i class="fas fa-search text-xl"></i><span class="text-[9px] font-bold mt-1">IA</span></button>
+        <button onclick="switchView('notes')" id="nav-notes" class="nav-btn flex flex-col items-center p-2 text-gray-400"><i class="fas fa-graduation-cap text-xl"></i><span class="text-[9px] font-bold mt-1">Notes</span></button>
+        <button onclick="switchView('community')" id="nav-community" class="nav-btn flex flex-col items-center p-2 text-gray-400"><i class="fas fa-users text-xl"></i><span class="text-[9px] font-bold mt-1">Amis</span></button>
+        <button onclick="switchView('profile')" id="nav-profile" class="nav-btn flex flex-col items-center p-2 text-gray-400"><i class="fas fa-user-circle text-xl"></i><span class="text-[9px] font-bold mt-1">Profil</span></button>
+    </nav>
+
+    <div id="imageModal" class="hidden fixed inset-0 z-[200] bg-black/90 flex items-center justify-center p-4" onclick="closeImageModal()">
+        <img id="modalImage" src="" class="max-w-full max-h-full object-contain rounded-lg">
+    </div>
+    
+    <!-- Modal pour médias (images et vidéos) -->
+    <div id="mediaModal" class="hidden fixed inset-0 z-[210] bg-black/95 flex items-center justify-center p-4" onclick="closeMediaModal()">
+        <div id="mediaContent" class="media-modal-content"></div>
+        <button onclick="closeMediaModal()" class="absolute top-4 right-4 text-white text-3xl">&times;</button>
+    </div>
+
+    <script>// Configuration Firebase
+const firebaseConfig = {
+    apiKey: "AIzaSyDXmjqF1DvqF0k8-YCUY-MHjyxRf6CBU78",
+    authDomain: "uts-e6211.firebaseapp.com",
+    projectId: "uts-e6211",
+    storageBucket: "uts-e6211.firebasestorage.app",
+    messagingSenderId: "520201058732",
+    appId: "1:520201058732:web:d2beaf37f46f7cd6daa209"
+};
+
+// Initialisation Firebase
+firebase.initializeApp(firebaseConfig);
+const db = firebase.firestore();
+const auth = firebase.auth();
+const storage = firebase.storage();
+
+// Variables
+let currentUser = null;
+let activeChatId = null;
+let unsubscribeChat = null;
+let lastArticleDoc = null;
+let isLoadingMore = false;
+let allArticlesLoaded = false;
+
+// ========== FONCTIONS DE NAVIGATION ==========
+function switchView(v) {
+    console.log("🔁 Navigation vers:", v);
+    
+    document.querySelectorAll('.view-section').forEach(s => s.classList.remove('active'));
+    const target = document.getElementById('view-' + v);
+    if (target) target.classList.add('active');
+    
+    document.querySelectorAll('.nav-btn').forEach(btn => {
+        btn.classList.remove('active-nav');
+        btn.classList.add('text-gray-400');
+    });
+    
+    const activeBtn = document.getElementById('nav-' + v);
+    if (activeBtn) {
+        activeBtn.classList.add('active-nav');
+        activeBtn.classList.remove('text-gray-400');
+    }
+    
+    if (v === 'home') loadInitialFeed();
+}
+
+function showToast(m) {
+    const t = document.getElementById('uts-toast');
+    const msg = document.getElementById('toast-message');
+    if (t && msg) {
+        msg.innerText = m;
+        t.classList.add('show');
+        setTimeout(() => t.classList.remove('show'), 3000);
+    }
+}
+
+function openSidebar() {
+    document.getElementById('sidebar')?.classList.add('open');
+    document.getElementById('sidebarOverlay')?.classList.add('open');
+}
+
+function closeSidebar() {
+    document.getElementById('sidebar')?.classList.remove('open');
+    document.getElementById('sidebarOverlay')?.classList.remove('open');
+}
+
+function openImageModal(src) {
+    const modal = document.getElementById('imageModal');
+    const img = document.getElementById('modalImage');
+    if (modal && img) {
+        img.src = src;
+        modal.classList.remove('hidden');
+    }
+}
+
+function closeImageModal() {
+    document.getElementById('imageModal')?.classList.add('hidden');
+}
+
+function handleLogout() {
+    if (confirm("Supprimer vos données ?")) {
+        localStorage.clear();
+        location.reload();
+    }
+}
+
+function installApp() {
+    showToast("📱 Utilisez 'Ajouter à l'écran d'accueil'");
+}
+
+// ========== SCROLL INFINI ==========
+async function loadMoreArticles() {
+    if (isLoadingMore || allArticlesLoaded) return;
+    isLoadingMore = true;
+    
+    let q;
+    if (lastArticleDoc) {
+        q = db.collection("articles").orderBy("createdAt", "desc").startAfter(lastArticleDoc).limit(5);
+    } else {
+        q = db.collection("articles").orderBy("createdAt", "desc").limit(5);
+    }
+    
+    const snap = await q.get();
+    if (snap.empty) {
+        allArticlesLoaded = true;
+        document.getElementById('load-more-container')?.classList.add('hidden');
+        isLoadingMore = false;
+        return;
+    }
+    
+    lastArticleDoc = snap.docs[snap.docs.length - 1];
+    const feed = document.getElementById('news-feed');
+    
+    snap.forEach(doc => {
+        const data = doc.data();
+        feed.innerHTML += `
+            <div class="bg-white rounded-3xl overflow-hidden shadow-sm border border-gray-100 mb-4">
+                <div class="p-5">
+                    <h3 class="font-black text-lg text-gray-800 mb-1">${(data.title || 'Article').replace(/</g, '&lt;')}</h3>
+                    <p class="text-sm text-gray-600 leading-relaxed">${(data.content || '').replace(/\n/g, '<br>').replace(/</g, '&lt;')}</p>
+                </div>
+            </div>`;
+    });
+    
+    if (snap.docs.length < 5) allArticlesLoaded = true;
+    document.getElementById('load-more-container')?.classList.toggle('hidden', allArticlesLoaded);
+    isLoadingMore = false;
+}
+
+function loadInitialFeed() {
+    lastArticleDoc = null;
+    allArticlesLoaded = false;
+    document.getElementById('news-feed').innerHTML = '';
+    loadMoreArticles();
+}
+
+// ========== AJOUTER ARTICLES DE DÉMO ==========
+async function ajouterArticlesDemo() {
+    const snap = await db.collection("articles").limit(1).get();
+    if (!snap.empty) return;
+    
+    const articles = [
+        { title: "📢 Rentrée universitaire 2025", content: "La rentrée académique est fixée au 1er octobre 2025.", createdAt: firebase.firestore.FieldValue.serverTimestamp() },
+        { title: "🏆 Conférence sur l'entrepreneuriat", content: "L'Université Thomas Sankara organise une conférence le 15 mai.", createdAt: firebase.firestore.FieldValue.serverTimestamp() },
+        { title: "📚 Bourses d'études disponibles", content: "Appel à candidatures pour les bourses d'excellence.", createdAt: firebase.firestore.FieldValue.serverTimestamp() },
+        { title: "💻 Hackathon UTS 2025", content: "Participez au plus grand hackathon de l'université !", createdAt: firebase.firestore.FieldValue.serverTimestamp() },
+        { title: "🎓 Cérémonie de remise des diplômes", content: "La cérémonie aura lieu le 20 décembre.", createdAt: firebase.firestore.FieldValue.serverTimestamp() }
+    ];
+    
+    for (const article of articles) {
+        await db.collection("articles").add(article);
+    }
+    loadInitialFeed();
+}
+
+// ========== CHAT ==========
+function startChat(amiId, amiNom) {
+    activeChatId = amiId;
+    document.getElementById('chatPartnerName').innerText = amiNom;
+    document.getElementById('chatWindow').classList.remove('hidden');
+    const roomId = [currentUser.uid, amiId].sort().join('_');
+    if (unsubscribeChat) unsubscribeChat();
+    unsubscribeChat = db.collection("messages").where("roomId", "==", roomId).orderBy("date", "asc").onSnapshot(snap => {
+        const box = document.getElementById('chatMessages');
+        if (!box) return;
+        box.innerHTML = "";
+        snap.forEach(doc => {
+            const m = doc.data();
+            const isMe = m.senderId === currentUser.uid;
+            const safeText = (m.text || '').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+            box.innerHTML += `<div class="max-w-[80%] chat-message ${isMe ? 'self-end bg-green-600 text-white rounded-l-2xl rounded-tr-2xl' : 'self-start bg-white border rounded-r-2xl rounded-tl-2xl shadow-sm'} p-3 text-sm">${safeText}</div>`;
+        });
+        box.scrollTo({ top: box.scrollHeight, behavior: 'smooth' });
+    });
+}
+
+async function sendMessage() {
+    const input = document.getElementById('chatInput');
+    const text = input.value.trim();
+    if (!text || !activeChatId) return;
+    const roomId = [currentUser.uid, activeChatId].sort().join('_');
+    input.value = "";
+    await db.collection("messages").add({ 
+        roomId, 
+        senderId: currentUser.uid, 
+        text: text.replace(/</g, '&lt;').replace(/>/g, '&gt;'), 
+        date: firebase.firestore.FieldValue.serverTimestamp() 
+    });
+}
+
+function closeChat() {
+    document.getElementById('chatWindow').classList.add('hidden');
+    if (unsubscribeChat) unsubscribeChat();
+}
+
+// ========== PROFIL ==========
+async function registerUser() {
+    const nom = document.getElementById('reg-nom').value.trim();
+    const prenom = document.getElementById('reg-prenom').value.trim();
+    const filiere = document.getElementById('reg-filiere').value.trim();
+    if (!nom || !prenom) return showToast("⚠️ Nom/Prénom requis");
+    
+    const userData = { 
+        nom: nom.replace(/</g, '&lt;'), 
+        prenom: prenom.replace(/</g, '&lt;'), 
+        filiere: filiere.replace(/</g, '&lt;'), 
+        avatar: "", 
+        date: firebase.firestore.FieldValue.serverTimestamp() 
+    };
+    localStorage.setItem('uts_user_data', JSON.stringify(userData));
+    localStorage.setItem('uts_registered', 'true');
+    await db.collection("users").doc(currentUser.uid).set(userData);
+    updateProfileUI(userData);
+    showToast("✅ Profil enregistré !");
+    switchView('home');
+}
+
+async function previewImage(e, instant = false) {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = async (ev) => {
+        const url = ev.target.result;
+        document.getElementById('temp-avatar').src = url;
+        document.getElementById('user-img').src = url;
+        if (instant && currentUser) {
+            const data = JSON.parse(localStorage.getItem('uts_user_data'));
+            data.avatar = url;
+            await db.collection("users").doc(currentUser.uid).set(data);
+            localStorage.setItem('uts_user_data', JSON.stringify(data));
+            showToast("📸 Photo mise à jour !");
+        }
+    };
+    reader.readAsDataURL(file);
+}
+
+function updateProfileUI(data) {
+    document.getElementById('register-ui').classList.add('hidden');
+    document.getElementById('profile-ui').classList.remove('hidden');
+    document.getElementById('user-full-name').innerText = `${data.prenom || ''} ${data.nom || ''}`;
+    document.getElementById('user-sub').innerText = data.filiere || '';
+    if (data.avatar) document.getElementById('user-img').src = data.avatar;
+}
+
+// ========== NOTES ==========
+async function searchNotes() {
+    const ine = document.getElementById('matSearch').value.trim();
+    const res = document.getElementById('resultArea');
+    if (!ine) return showToast("Entrez votre INE");
+    res.innerHTML = '<div class="text-center text-gray-500">🔍 Recherche...</div>';
+    try {
+        const snap = await db.collection("notes").where("ine", "==", ine).get();
+        if (snap.empty) {
+            res.innerHTML = `<div class="bg-blue-50 p-6 rounded-2xl text-center"><p class="font-bold text-blue-700">📭 Aucune note pour ${ine.replace(/</g, '&lt;')}</p></div>`;
+            return;
+        }
+        let html = `<div class="space-y-4">`;
+        snap.forEach(doc => {
+            const n = doc.data();
+            html += `<div class="bg-white rounded-2xl border p-4">
+                        <div class="font-bold text-green-800">📚 ${(n.matiere || "Sans matière").replace(/</g, '&lt;')}</div>
+                        <div class="text-2xl font-black text-green-700">${n.note || "?"}/20</div>
+                        ${n.commentaire ? `<div class="text-sm italic">“${n.commentaire.replace(/</g, '&lt;')}”</div>` : ''}
+                    </div>`;
+        });
+        html += `</div>`;
+        res.innerHTML = html;
+    } catch (error) {
+        res.innerHTML = `<div class="text-red-500">❌ Erreur</div>`;
+    }
+}        // ========== STORIES AVEC IMAGES ET VIDÉOS (VERSION COMPAT CORRECTE) ==========
+        async function postStory(e) {
+            const file = e.target.files[0];
+            if (!file || !currentUser) {
+                showToast("❌ Connectez-vous d'abord");
+                return;
+            }
+            
+            const isVideo = file.type.startsWith('video/');
+            const isImage = file.type.startsWith('image/');
+            
+            if (!isVideo && !isImage) {
+                showToast("❌ Seules les images et vidéos sont acceptées");
+                return;
+            }
+            
+            // Limites
+            if (isVideo && file.size > 10 * 1024 * 1024) {
+                showToast("❌ Vidéo trop lourde (max 10 Mo)");
+                return;
+            }
+            if (isImage && file.size > 5 * 1024 * 1024) {
+                showToast("❌ Image trop lourde (max 5 Mo)");
+                return;
+            }
+            
+            showToast("⏳ Publication en cours...");
+            
+            try {
+                const userData = JSON.parse(localStorage.getItem('uts_user_data'));
+                const fileName = `${Date.now()}_${file.name}`;
+                const storageRef = storage.ref(`stories/${currentUser.uid}/${fileName}`);
+                
+                // Téléchargement version compat
+                const snapshot = await storageRef.put(file);
+                const url = await snapshot.ref.getDownloadURL();
+                
+                await db.collection("stories").add({
+                    mediaUrl: url,
+                    mediaType: isVideo ? 'video' : 'image',
+                    userName: userData?.prenom || "Anonyme",
+                    userId: currentUser.uid,
+                    date: firebase.firestore.FieldValue.serverTimestamp()
+                });
+                
+                showToast(`✨ Story ${isVideo ? 'vidéo' : 'photo'} publiée !`);
+            } catch (error) {
+                console.error(error);
+                showToast("❌ Erreur de connexion au stockage");
+            }
+            
+            e.target.value = '';
+        }
+
+        // Modal pour médias (images ET vidéos)
+        function openMediaModal(url, type) {
+            const modal = document.getElementById('mediaModal');
+            const content = document.getElementById('mediaContent');
+            if (type === 'video') {
+                content.innerHTML = `<video src="${url}" controls autoplay class="max-w-full max-h-[80vh] rounded-lg"></video>`;
+            } else {
+                content.innerHTML = `<img src="${url}" class="max-w-full max-h-[80vh] rounded-lg">`;
+            }
+            modal.classList.remove('hidden');
+        }
+
+        function closeMediaModal() {
+            const modal = document.getElementById('mediaModal');
+            const content = document.getElementById('mediaContent');
+            if (content) content.innerHTML = '';
+            if (modal) modal.classList.add('hidden');
+        }
+
+        // ========== IA LOCALE (MobileLLM-125M - fonctionne SANS internet) ==========
+        let generator = null;
+        let isModelReady = false;
+        let downloadInProgress = false;
+
+        async function telechargerIA() {
+            if (downloadInProgress || isModelReady) {
+                if (isModelReady) showToast("✅ IA déjà prête !");
+                return;
+            }
+            
+            const confirmation = confirm(
+                "📥 TÉLÉCHARGEMENT DE L'IA LOCALE\n\n" +
+                "• Poids : environ 250 Mo\n" +
+                "• Temps : 3 à 10 min selon connexion\n" +
+                "• Wi-Fi recommandé\n" +
+                "• Fonctionne SANS INTERNET après téléchargement\n\n" +
+                "Continuer ?"
+            );
+            if (!confirmation) return showToast("❌ Annulé");
+            
+            downloadInProgress = true;
+            const cont = document.getElementById('aiDownloadContainer');
+            const progressBar = document.getElementById('aiProgressBar');
+            const percentEl = document.getElementById('dlPercent');
+            const statusEl = document.getElementById('dlStatus');
+            
+            if (cont) cont.classList.remove('hidden');
+            
+            showToast("⏳ Téléchargement de l'IA (250 Mo)...");
+            
+            try {
+                // Chargement dynamique du module
+                const { pipeline } = await import('https://unpkg.com/@huggingface/transformers@3.3.3/dist/transformers.min.js');
+                
+                generator = await pipeline('text-generation', 'Xenova/MobileLLM-125M', {
+                    progress_callback: (p) => {
+                        if (p.status === 'downloading') {
+                            const pc = Math.round(p.progress * 100);
+                            if (progressBar) progressBar.style.width = pc + '%';
+                            if (percentEl) percentEl.innerText = pc + '%';
+                            if (statusEl) statusEl.innerText = `Téléchargement... ${pc}%`;
+                        } else if (p.status === 'ready') {
+                            if (statusEl) statusEl.innerText = 'Prêt !';
+                        }
+                    }
+                });
+                isModelReady = true;
+                if (cont) cont.classList.add('hidden');
+                showToast("🤖 IA prête ! Vous pouvez l'utiliser hors connexion");
+            } catch (e) {
+                console.error(e);
+                showToast("❌ Échec téléchargement IA. Vérifiez votre connexion");
+                if (cont) cont.classList.add('hidden');
+            } finally {
+                downloadInProgress = false;
+            }
+        }
+
+        let lastAskTime = 0;
+        async function askAI() {
+            const now = Date.now();
+            if (now - lastAskTime < 2000) {
+                showToast("⏳ Attends 2 secondes entre chaque question");
+                return;
+            }
+            lastAskTime = now;
+            
+            const q = document.getElementById('aiQuery').value.trim();
+            if (!q) return;
+            
+            if (!isModelReady || !generator) {
+                showToast("📥 Téléchargez d'abord l'IA (menu → 📥 Télécharger l'IA)");
+                return;
+            }
+            
+            const responseDiv = document.getElementById('aiResponse');
+            if (!responseDiv) return;
+            responseDiv.innerText = "🧠 Réflexion...";
+            
+            try {
+                const connaissances = "Tu es l'assistant UTS Social créé par KONSÉGUÉ Relwendé Christian. Tu es au Burkina Faso, à l'Université Thomas Sankara. Le Chef de l'État est le Capitaine Ibrahim Traoré. Tu es amical et tu aides les étudiants en français. Réponds en moins de 80 mots.";
+                const result = await generator(`${connaissances}\nUtilisateur: ${q}\nAssistant:`, { 
+                    max_new_tokens: 80, 
+                    temperature: 0.7 
+                });
+                let reponse = result[0].generated_text.split('Assistant:')[1]?.trim() || "Je ne sais pas.";
+                responseDiv.innerText = reponse;
+            } catch(e) {
+                console.error(e);
+                responseDiv.innerText = "❌ Erreur IA. Réessaie.";
+            }
+            document.getElementById('aiQuery').value = "";
+        }
+
+        // ========== INSTALLATION PWA AMÉLIORÉE ==========
+        let deferredPrompt = null;
+
+        window.addEventListener('beforeinstallprompt', (e) => {
+            e.preventDefault();
+            deferredPrompt = e;
+            console.log("✅ PWA prête à être installée");
+        });
+
+        window.addEventListener('appinstalled', () => {
+            showToast("✨ Merci d'avoir installé UTS Social !");
+            deferredPrompt = null;
+        });
+
+        function installApp() {
+            if (deferredPrompt) {
+                deferredPrompt.prompt();
+                deferredPrompt.userChoice.then((choiceResult) => {
+                    if (choiceResult.outcome === 'accepted') {
+                        showToast("🎉 Installation lancée !");
+                    } else {
+                        showToast("📱 Installation annulée");
+                    }
+                    deferredPrompt = null;
+                });
+            } else {
+                showToast("📱 Utilisez 'Ajouter à l'écran d'accueil' depuis le menu du navigateur");
+            }
+        }
+
+        // ========== LISTE D'AMIS ==========
+        function updateFriendsList(users) {
+            const list = document.getElementById('friendsList');
+            if (!list) return;
+            const searchTerm = document.getElementById('searchFriend')?.value.toLowerCase() || '';
+            list.innerHTML = "";
+            users.forEach(userDoc => {
+                const u = userDoc.data();
+                if (currentUser && userDoc.id === currentUser.uid) return;
+                const fullName = `${u.prenom || ''} ${u.nom || ''}`.toLowerCase();
+                if (searchTerm && !fullName.includes(searchTerm)) return;
+                list.innerHTML += `
+                    <div class="flex items-center gap-4 p-4 hover:bg-gray-50 cursor-pointer" onclick="startChat('${userDoc.id}', '${(u.prenom || '').replace(/</g, '&lt;')} ${(u.nom || '').replace(/</g, '&lt;')}')">
+                        <img src="${u.avatar || 'https://cdn-icons-png.flaticon.com/512/149/149071.png'}" class="w-12 h-12 rounded-full object-cover border-2 border-green-500">
+                        <div class="flex-1">
+                            <h4 class="font-bold">${(u.prenom || '').replace(/</g, '&lt;')} ${(u.nom || '').replace(/</g, '&lt;')}</h4>
+                            <p class="text-[10px] text-gray-500">${(u.filiere || 'Étudiant').replace(/</g, '&lt;')}</p>
+                        </div>
+                        <i class="fas fa-comment-dots text-green-600"></i>
+                    </div>`;
+            });
+        }
+
+        // ========== CHARGEMENT DES DONNÉES ==========
+        function chargerDonneesGlobales() {
+            const loadMoreBtn = document.getElementById('load-more-btn');
+            if (loadMoreBtn) loadMoreBtn.onclick = loadMoreArticles;
+            ajouterArticlesDemo();
+            
+            // Stories avec images ET vidéos
+            db.collection("stories").orderBy("date", "desc").limit(12).onSnapshot(snap => {
+                const container = document.getElementById('stories-container');
+                if (!container) return;
+                container.innerHTML = "";
+                snap.forEach(d => {
+                    const s = d.data();
+                    const isVideo = s.mediaType === 'video';
+                    container.innerHTML += `
+                        <div class="flex-shrink-0 w-16 text-center cursor-pointer" onclick="openMediaModal('${s.mediaUrl}', '${s.mediaType}')">
+                            <div class="w-14 h-14 rounded-full border-2 border-green-500 p-0.5 relative">
+                                ${isVideo ? '<i class="fas fa-play absolute inset-0 m-auto text-white text-xs bg-black/50 rounded-full w-5 h-5 flex items-center justify-center"></i>' : ''}
+                                <img src="${s.mediaUrl}" class="w-full h-full rounded-full object-cover" onerror="this.src='https://cdn-icons-png.flaticon.com/512/149/149071.png'">
+                            </div>
+                            <span class="text-[9px] mt-1 block truncate">${(s.userName || '').replace(/</g, '&lt;')}</span>
+                        </div>`;
+                });
+            });
+
+            // Liste des utilisateurs
+            db.collection("users").orderBy("date", "desc").onSnapshot(snap => {
+                const users = [];
+                snap.forEach(u => users.push(u));
+                updateFriendsList(users);
+            });
+            
+            // Recherche d'amis
+            const searchInput = document.getElementById('searchFriend');
+            if (searchInput) {
+                searchInput.addEventListener('input', () => {
+                    db.collection("users").orderBy("date", "desc").onSnapshot(snap => {
+                        const users = [];
+                        snap.forEach(u => users.push(u));
+                        updateFriendsList(users);
+                    });
+                });
+            }
+        }
+
+        // ========== AUTHENTIFICATION ==========
+        auth.onAuthStateChanged(async (user) => {
+            if (!user) {
+                await auth.signInAnonymously();
+            } else {
+                currentUser = user;
+                const saved = localStorage.getItem('uts_user_data');
+                if (saved) updateProfileUI(JSON.parse(saved));
+                chargerDonneesGlobales();
+            }
+        });
+
+        // ========== FONCTIONS COMPLÉMENTAIRES ==========
+        function sanitizeText(str) {
+            if (!str) return '';
+            return str.replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        }
+
+        // ========== EXPOSER LES FONCTIONS GLOBALEMENT ==========
+        window.switchView = switchView;
+        window.openSidebar = openSidebar;
+        window.closeSidebar = closeSidebar;
+        window.openImageModal = openImageModal;
+        window.closeImageModal = closeImageModal;
+        window.openMediaModal = openMediaModal;
+        window.closeMediaModal = closeMediaModal;
+        window.handleLogout = handleLogout;
+        window.installApp = installApp;
+        window.startChat = startChat;
+        window.sendMessage = sendMessage;
+        window.closeChat = closeChat;
+        window.registerUser = registerUser;
+        window.previewImage = previewImage;
+        window.searchNotes = searchNotes;
+        window.postStory = postStory;
+        window.telechargerIA = telechargerIA;
+        window.askAI = askAI;
+        window.showToast = showToast;
+        window.sanitizeText = sanitizeText;
+
+        // ========== DÉMARRAGE ==========
+        window.onload = () => {
+            console.log("🚀 Application UTS Social démarrée");
+            if (!localStorage.getItem('uts_registered')) {
+                switchView('profile');
+            } else {
+                switchView('home');
+            }
+        };
+    </script>
+</body>
+</html>
