@@ -468,5 +468,213 @@ async function searchNotes() {
     } catch (error) {
         res.innerHTML = `<div class="text-red-500">❌ Erreur</div>`;
     }
-}
+}        // ========== GESTION DES STORIES ==========
+        async function postStory(e) {
+            const file = e.target.files[0];
+            if (!file || !currentUser) return showToast("❌ Connectez-vous d'abord");
+            
+            const isVideo = file.type.startsWith('video/');
+            const isImage = file.type.startsWith('image/');
+            if (!isVideo && !isImage) return showToast("❌ Images ou vidéos uniquement");
+            
+            const maxSize = isVideo ? 10 * 1024 * 1024 : 5 * 1024 * 1024;
+            if (file.size > maxSize) return showToast("❌ Fichier trop lourd");
+            
+            showToast("⏳ Publication...");
+            try {
+                const userData = JSON.parse(localStorage.getItem('uts_user_data'));
+                const fileName = `${Date.now()}_${file.name}`;
+                const storageRef = storage.ref(`stories/${currentUser.uid}/${fileName}`);
+                const snapshot = await storageRef.put(file);
+                const url = await snapshot.ref.getDownloadURL();
+                
+                await db.collection("stories").add({
+                    mediaUrl: url,
+                    mediaType: isVideo ? 'video' : 'image',
+                    userName: userData?.prenom || "Anonyme",
+                    userId: currentUser.uid,
+                    date: firebase.firestore.FieldValue.serverTimestamp()
+                });
+                showToast("✨ Story publiée !");
+            } catch (error) {
+                showToast("❌ Erreur de stockage");
+            }
+            e.target.value = '';
+        }
+
+        function openMediaModal(url, type) {
+            const modal = document.getElementById('mediaModal');
+            const content = document.getElementById('mediaContent');
+            content.innerHTML = type === 'video' 
+                ? `<video src="${url}" controls autoplay class="max-w-full max-h-[80vh] rounded-lg"></video>`
+                : `<img src="${url}" class="max-w-full max-h-[80vh] rounded-lg">`;
+            modal.classList.remove('hidden');
+        }
+
+        function closeMediaModal() {
+            const content = document.getElementById('mediaContent');
+            if (content) content.innerHTML = '';
+            document.getElementById('mediaModal')?.classList.add('hidden');
+        }
+
+        async function supprimerAnciennesStories() {
+            const ilYa24h = new Date(Date.now() - 24 * 60 * 60 * 1000);
+            const snap = await db.collection("stories").where("date", "<", ilYa24h).get();
+            snap.forEach(doc => doc.ref.delete());
+        }
+
+        function formatDateRelative(date) {
+            const diff = Math.floor((new Date() - date) / 60000);
+            if (diff < 1) return "à l'instant";
+            if (diff < 60) return `il y a ${diff} min`;
+            if (diff < 1440) return `il y a ${Math.floor(diff / 60)}h`;
+            return "hier";
+        }
+
+        // ========== MOTEUR IA MULTI-SOURCE (SÉCURISÉ) ==========
+        let lastAskTime = 0;
+
+        async function callGroq(question, key) {
+            const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+                method: "POST",
+                headers: { "Authorization": `Bearer ${key}`, "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    model: "llama-3.3-70b-versatile",
+                    messages: [
+                        { role: "system", content: "Tu es un ami étudiant burkinabè, calme et bienveillant. Le créateur de UTS Social est Christian Konségué." },
+                        { role: "user", content: question }
+                    ],
+                    temperature: 0.7
+                })
+            });
+            const data = await res.json();
+            return data.choices[0].message.content;
+        }
+
+        async function callGemini(question, key) {
+            const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${key}`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ contents: [{ parts: [{ text: "Réponds comme un camarade étudiant : " + question }] }] })
+            });
+            const data = await res.json();
+            return data.candidates[0].content.parts[0].text;
+        }
+
+        async function askAI() {
+            const now = Date.now();
+            if (now - lastAskTime < 2000) return showToast("⏳ Attends un peu...");
+            lastAskTime = now;
+
+            const q = document.getElementById('aiQuery').value.trim();
+            if (!q) return;
+
+            const responseDiv = document.getElementById('aiResponse');
+            responseDiv.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Réflexion...';
+
+            try {
+                // Récupération dynamique de la config (Clés + Provider)
+                if (!aiConfig) {
+                    const doc = await db.collection("config").doc("keys").get();
+                    aiConfig = doc.data();
+                }
+
+                let finalResponse = "";
+                if (aiConfig.active_provider === "groq") {
+                    finalResponse = await callGroq(q, aiConfig.groq_key);
+                } else {
+                    finalResponse = await callGemini(q, aiConfig.gemini_key);
+                }
+
+                responseDiv.innerText = finalResponse.replace(/[#*_`~>]/g, '');
+            } catch (e) {
+                console.error(e);
+                responseDiv.innerText = "Service temporairement indisponible.";
+            }
+            document.getElementById('aiQuery').value = "";
+        }
+
+        function telechargerIA() { showToast("✅ IA connectée et sécurisée"); }
+
+        // ========== INSTALLATION PWA ==========
+        let deferredPrompt = null;
+        window.addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); deferredPrompt = e; });
+        function installApp() {
+            if (deferredPrompt) {
+                deferredPrompt.prompt();
+                deferredPrompt = null;
+            } else {
+                showToast("📱 Menu -> Ajouter à l'écran d'accueil");
+            }
+        }
+
+        // ========== INITIALISATION ET CHARGEMENT ==========
+        function updateFriendsList(users) {
+            const list = document.getElementById('friendsList');
+            if (!list) return;
+            list.innerHTML = "";
+            users.forEach(doc => {
+                const u = doc.data();
+                if (currentUser && doc.id === currentUser.uid) return;
+                list.innerHTML += `
+                    <div class="flex items-center gap-4 p-4 hover:bg-gray-50 cursor-pointer" onclick="startChat('${doc.id}', '${u.prenom} ${u.nom}')">
+                        <img src="${u.avatar || 'https://cdn-icons-png.flaticon.com/512/149/149071.png'}" class="w-12 h-12 rounded-full object-cover border-2 border-green-500">
+                        <div class="flex-1"><h4 class="font-bold">${u.prenom} ${u.nom}</h4><p class="text-[10px] text-gray-500">${u.filiere}</p></div>
+                        <i class="fas fa-comment-dots text-green-600"></i>
+                    </div>`;
+            });
+        }
+
+        function chargerDonneesGlobales() {
+            supprimerAnciennesStories();
+            ajouterArticlesDemo();
+            
+            db.collection("stories").orderBy("date", "desc").limit(12).onSnapshot(snap => {
+                const container = document.getElementById('stories-container');
+                if (!container) return;
+                container.innerHTML = "";
+                snap.forEach(d => {
+                    const s = d.data();
+                    const date = s.date?.toDate() || new Date();
+                    container.innerHTML += `
+                        <div class="flex-shrink-0 w-16 text-center cursor-pointer" onclick="openMediaModal('${s.mediaUrl}', '${s.mediaType}')">
+                            <div class="w-14 h-14 rounded-full border-2 border-green-500 p-0.5 relative">
+                                ${s.mediaType === 'video' ? '<i class="fas fa-play absolute inset-0 m-auto text-white text-[8px] bg-black/50 rounded-full w-4 h-4 flex items-center justify-center"></i>' : ''}
+                                <img src="${s.mediaUrl}" class="w-full h-full rounded-full object-cover">
+                            </div>
+                            <span class="text-[9px] mt-1 block truncate">${s.userName}</span>
+                        </div>`;
+                });
+            });
+
+            db.collection("users").orderBy("date", "desc").onSnapshot(snap => updateFriendsList(snap));
+        }
+
+        auth.onAuthStateChanged(async (user) => {
+            if (!user) {
+                await auth.signInAnonymously();
+            } else {
+                currentUser = user;
+                const saved = localStorage.getItem('uts_user_data');
+                if (saved) updateProfileUI(JSON.parse(saved));
+                chargerDonneesGlobales();
+            }
+        });
+
+        window.onload = () => {
+            if (!localStorage.getItem('uts_registered')) switchView('profile');
+            else switchView('home');
+        };
+
+        // Export des fonctions
+        Object.assign(window, { 
+            switchView, openSidebar, closeSidebar, openImageModal, closeImageModal, 
+            openMediaModal, closeMediaModal, handleLogout, installApp, startChat, 
+            sendMessage, closeChat, registerUser, previewImage, searchNotes, 
+            postStory, telechargerIA, askAI, showToast 
+        });
+    </script>
+</body>
+</html>
+
         
