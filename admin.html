@@ -142,4 +142,360 @@
                     </div>
                     <textarea id="noteCommentaire" rows="2" placeholder="Commentaire (optionnel)" class="input-pro w-full mt-3 border p-2 rounded-xl"></textarea>
                     <button onclick="addSingleNote()" class="uts-green text-white px-6 py-2 rounded-xl font-bold mt-3">💾 Enregistrer</button>
+                </div>                <div class="bg-white rounded-2xl p-5 shadow-sm">
+                    <h2 class="text-xl font-bold text-green-700 mb-4">🔍 Modifier / Supprimer les notes</h2>
+                    <div class="flex gap-2 mb-4">
+                        <input type="text" id="searchIne" placeholder="Rechercher par INE..." class="input-pro flex-1 border p-2 rounded-xl">
+                        <button onclick="searchNotes()" class="uts-green text-white px-4 py-2 rounded-xl">🔍</button>
+                    </div>
+                    <div id="notesList" class="max-h-96 overflow-y-auto">
+                        <p class="text-gray-400 text-center py-4">Chargement...</p>
+                    </div>
                 </div>
+            </div>
+
+            <!-- ========== ONGLET IMPORT CSV ========== -->
+            <div id="importTab" class="hidden space-y-4">
+                <div class="bg-white rounded-2xl p-5 shadow-sm">
+                    <h2 class="text-xl font-bold text-green-700 mb-4">📁 Import CSV / Notes massives</h2>
+                    <p class="text-sm text-gray-500 mb-3">Format : INE, Matière, Note, Semestre, Commentaire</p>
+                    <textarea id="csvData" rows="6" placeholder="INE,Matière,Note,Semestre,Commentaire&#10;12345,Maths,15,S1,Très bien&#10;12345,Physique,12,S1,Passable" class="input-pro w-full mb-3 font-mono text-sm border p-2 rounded-xl"></textarea>
+                    <button onclick="importCSV()" class="uts-green text-white px-6 py-2 rounded-xl font-bold">📤 Importer massivement</button>
+                    <div id="importResult" class="mt-3 text-sm"></div>
+                </div>
+            </div>
+
+            <!-- ========== ONGLET NETTOYAGE ========== -->
+            <div id="cleanupTab" class="hidden space-y-4">
+                <div class="bg-white rounded-2xl p-5 shadow-sm">
+                    <h2 class="text-xl font-bold text-green-700 mb-4">🗑️ Nettoyage automatique</h2>
+                    <p class="text-gray-600 mb-3">Les articles expirés peuvent être nettoyés manuellement ou automatiquement.</p>
+                    <button onclick="cleanupExpired()" class="bg-red-600 text-white px-6 py-2 rounded-xl font-bold">🧹 Nettoyer maintenant</button>
+                    <div id="cleanupResult" class="mt-3 text-sm"></div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- SCRIPT DE COMPATIBILITÉ TOTAL AVEC TON INDEX.HTML -->
+    <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-firestore-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-auth-compat.js"></script>
+
+    <script>
+        // Configuration identique à ton application
+        const firebaseConfig = {
+            apiKey: "AIzaSyDXmjqF1DvqF0k8-YCUY-MHjyxRf6CBU78",
+            authDomain: "uts-e6211.firebaseapp.com",
+            projectId: "uts-e6211",
+            storageBucket: "uts-e6211.firebasestorage.app",
+            messagingSenderId: "520201058732",
+            appId: "1:520201058732:web:d2beaf37f46f7cd6daa209"
+        };
+
+        firebase.initializeApp(firebaseConfig);
+        const db = firebase.firestore();
+        const auth = firebase.auth();
+
+        const ADMIN_PASSWORD = "20251";
+        let currentUser = null;
+
+        // --- GESTION ACCÈS ADMIN ---
+        window.checkAdminPassword = function() {
+            const pwd = document.getElementById('adminPassword').value;
+            if (pwd === ADMIN_PASSWORD) {
+                localStorage.setItem('admin_logged', 'true');
+                document.getElementById('loginScreen').classList.add('hidden');
+                document.getElementById('adminContent').classList.remove('hidden');
+                loadStats();
+                loadArticles();
+                loadAllNotes();
+            } else {
+                alert("❌ Mot de passe incorrect");
+            }
+        };
+
+        window.logoutAdmin = function() {
+            localStorage.removeItem('admin_logged');
+            location.reload();
+        };
+
+        // --- APERÇU DE L'IMAGE DANS L'ADMIN ---
+        window.previewExternalImage = function(url) {
+            const trimmedUrl = url.trim();
+            if (trimmedUrl) {
+                document.getElementById('imagePreview').src = trimmedUrl;
+                document.getElementById('imagePreviewContainer').classList.remove('hidden');
+                document.getElementById('previewImageBox').innerHTML = `<img src="${trimmedUrl}" class="w-full h-48 object-cover rounded-xl mb-3">`;
+            } else {
+                document.getElementById('imagePreviewContainer').classList.add('hidden');
+                document.getElementById('previewImageBox').innerHTML = '';
+            }
+        };
+
+        // --- STATISTIQUES ---
+        window.loadStats = async function() {
+            try {
+                const articlesSnap = await db.collection("articles").get();
+                const notesSnap = await db.collection("notes").get();
+                const usersSnap = await db.collection("users").get();
+                
+                document.getElementById('totalArticles').innerText = articlesSnap.size;
+                document.getElementById('totalNotes').innerText = notesSnap.size;
+                document.getElementById('totalUsers').innerText = usersSnap.size;
+                
+                const now = new Date();
+                let expired = 0;
+                articlesSnap.forEach(doc => {
+                    const data = doc.data();
+                    if (data.expiryDate && data.expiryDate.toDate() < now) expired++;
+                });
+                document.getElementById('expiredCount').innerText = expired;
+            } catch(e) { console.error(e); }
+        };
+
+        // --- CHARGEMENT DES ARTICLES DANS L'ADMIN ---
+        window.loadArticles = function() {
+            db.collection("articles").orderBy("createdAt", "desc").onSnapshot(snapshot => {
+                const container = document.getElementById('articlesList');
+                if (snapshot.empty) {
+                    container.innerHTML = '<p class="text-gray-400 text-center py-4">Aucun article publié</p>';
+                    return;
+                }
+                container.innerHTML = '';
+                snapshot.forEach(docSnap => {
+                    const data = docSnap.data();
+                    const expiryText = data.expiryDate ? new Date(data.expiryDate.toDate()).toLocaleDateString() : 'Jamais';
+                    const imageHtml = data.imageUrl ? `<img src="${data.imageUrl}" class="w-12 h-12 rounded object-cover mr-3">` : '<div class="w-12 h-12 bg-gray-200 rounded flex items-center justify-center text-gray-400 mr-3"><i class="fas fa-image"></i></div>';
+                    
+                    container.innerHTML += `
+                        <div class="border rounded-xl p-3 bg-gray-50">
+                            <div class="flex justify-between items-start">
+                                <div class="flex items-start gap-3 flex-1">
+                                    ${imageHtml}
+                                    <div class="flex-1">
+                                        <h3 class="font-bold text-green-700">${data.title}</h3>
+                                        <p class="text-sm text-gray-600">${data.content.substring(0, 100)}</p>
+                                        <p class="text-xs text-gray-400 mt-1">Expire: ${expiryText}</p>
+                                    </div>
+                                </div>
+                                <button onclick="deleteArticle('${docSnap.id}')" class="text-red-500 hover:text-red-700 ml-2"><i class="fas fa-trash"></i></button>
+                            </div>
+                        </div>
+                    `;
+                });
+            });
+        };
+
+        window.deleteArticle = async (id) => {
+            if (confirm("Supprimer cet article ?")) {
+                await db.collection("articles").doc(id).delete();
+                loadStats();
+            }
+        };
+
+        // --- PUBLICATION DE L'ARTICLE COOPÉRATIF ---
+        window.publishArticle = async function() {
+            const title = document.getElementById('articleTitle').value.trim();
+            const content = document.getElementById('articleContent').value.trim();
+            const imageUrl = document.getElementById('articleImageUrl').value.trim() || null;
+            
+            if (!title || !content) { alert("Titre et contenu requis"); return; }
+            
+            try {
+                let expiryDate = null;
+                const expiryType = document.getElementById('expiryType').value;
+                if (expiryType === '7') {
+                    expiryDate = firebase.firestore.Timestamp.fromDate(new Date(Date.now() + 7 * 24 * 60 * 60 * 1000));
+                } else if (expiryType === '30') {
+                    expiryDate = firebase.firestore.Timestamp.fromDate(new Date(Date.now() + 30 * 24 * 60 * 60 * 1000));
+                } else if (expiryType === 'custom') {
+                    const custom = document.getElementById('customExpiry').value;
+                    if (custom) expiryDate = firebase.firestore.Timestamp.fromDate(new Date(custom));
+                }
+                
+                // Enregistrement avec les fonctions de compatibilité v9/v8
+                await db.collection("articles").add({ 
+                    title: title, 
+                    content: content, 
+                    imageUrl: imageUrl, 
+                    createdAt: firebase.firestore.FieldValue.serverTimestamp(), 
+                    expiryDate: expiryDate 
+                });
+
+                document.getElementById('articleTitle').value = '';
+                document.getElementById('articleContent').value = '';
+                document.getElementById('articleImageUrl').value = '';
+                document.getElementById('imagePreviewContainer').classList.add('hidden');
+                document.getElementById('previewImageBox').innerHTML = '';
+                document.getElementById('previewTitle').innerText = "Titre de l'article";
+                document.getElementById('previewContent').innerHTML = "Le contenu apparaîtra ici...";
+                
+                alert("✅ Article et image partagés sur l'accueil !");
+                loadStats();
+            } catch(e) {
+                console.error(e);
+                alert("❌ Erreur lors du partage.");
+            }
+        };
+
+        // --- GESTION DES NOTES ---
+        window.loadAllNotes = async function() {
+            try {
+                const snapshot = await db.collection("notes").get();
+                const container = document.getElementById('notesList');
+                if (snapshot.empty) {
+                    container.innerHTML = '<p class="text-gray-400 text-center py-4">Aucune note</p>';
+                    return;
+                }
+                let html = '<table class="w-full text-sm"><thead><tr class="border-b"><th class="text-left py-2">INE</th><th>Matière</th><th>Note</th><th>Semestre</th><th>Actions</th></tr></thead><tbody>';
+                snapshot.forEach(doc => {
+                    const data = doc.data();
+                    html += `<tr class="border-b">
+                        <td class="py-2">${data.ine}</td>
+                        <td>${data.matiere}</td>
+                        <td>${data.note}/20</td>
+                        <td>${data.semestre || 'S1'}</td>
+                        <td><button onclick="deleteNote('${doc.id}')" class="text-red-500"><i class="fas fa-trash"></i></button></td>
+                    </tr>`;
+                });
+                html += '</tbody></table>';
+                container.innerHTML = html;
+            } catch(e) { console.error(e); }
+        };
+
+        window.deleteNote = async (id) => {
+            if (confirm("Supprimer cette note ?")) {
+                await db.collection("notes").doc(id).delete();
+                loadAllNotes();
+                loadStats();
+            }
+        };
+
+        window.searchNotes = async () => {
+            const ine = document.getElementById('searchIne').value.trim();
+            if (!ine) { loadAllNotes(); return; }
+            const snapshot = await db.collection("notes").where("ine", "==", ine).get();
+            const container = document.getElementById('notesList');
+            if (snapshot.empty) {
+                container.innerHTML = '<p class="text-gray-400 text-center py-4">Aucune note pour cet INE</p>';
+                return;
+            }
+            let html = '<table class="w-full text-sm"><thead><tr class="border-b"><th class="text-left py-2">INE</th><th>Matière</th><th>Note</th><th>Semestre</th><th>Actions</th></tr></thead><tbody>';
+            snapshot.forEach(doc => {
+                const data = doc.data();
+                html += `<tr class="border-b">
+                    <td class="py-2">${data.ine}</td>
+                    <td>${data.matiere}</td>
+                    <td>${data.note}/20</td>
+                    <td>${data.semestre || 'S1'}</td>
+                    <td><button onclick="deleteNote('${doc.id}')" class="text-red-500"><i class="fas fa-trash"></i></button></td>
+                </tr>`;
+            });
+            html += '</tbody></table>';
+            container.innerHTML = html;
+        };
+
+        window.addSingleNote = async () => {
+            const ine = document.getElementById('noteIne').value.trim();
+            const matiere = document.getElementById('noteMatiere').value.trim();
+            const note = parseFloat(document.getElementById('noteValue').value);
+            const semestre = document.getElementById('noteSemestre').value;
+            const commentaire = document.getElementById('noteCommentaire').value.trim();
+            if (!ine || !matiere || isNaN(note)) { alert("INE, Matière et Note requis"); return; }
+            
+            await db.collection("notes").add({ ine, matiere, note, semestre, commentaire, createdAt: firebase.firestore.FieldValue.serverTimestamp() });
+            alert("✅ Note ajoutée");
+            document.getElementById('noteIne').value = '';
+            document.getElementById('noteMatiere').value = '';
+            document.getElementById('noteValue').value = '';
+            document.getElementById('noteCommentaire').value = '';
+            loadAllNotes();
+            loadStats();
+        };
+
+        window.importCSV = async () => {
+            const csvText = document.getElementById('csvData').value;
+            const lines = csvText.trim().split('\n');
+            if (lines.length < 2) { alert("CSV vide ou invalide"); return; }
+            let success = 0, errors = 0;
+            for (let i = 1; i < lines.length; i++) {
+                const cols = lines[i].split(',');
+                if (cols.length >= 4) {
+                    try {
+                        await db.collection("notes").add({
+                            ine: cols[0].trim(),
+                            matiere: cols[1].trim(),
+                            note: parseFloat(cols[2]),
+                            semestre: cols[3].trim(),
+                            commentaire: cols[4]?.trim() || '',
+                            createdAt: firebase.firestore.FieldValue.serverTimestamp()
+                        });
+                        success++;
+                    } catch(e) { errors++; }
+                } else { errors++; }
+            }
+            document.getElementById('importResult').innerHTML = `<p class="text-green-600">✅ ${success} notes importées</p>${errors > 0 ? `<p class="text-red-500">⚠️ ${errors} erreurs</p>` : ''}`;
+            loadAllNotes();
+            loadStats();
+        };
+
+        window.cleanupExpired = async () => {
+            const articlesSnap = await db.collection("articles").get();
+            const now = new Date();
+            let deleted = 0;
+            articlesSnap.forEach(async (docSnap) => {
+                const data = docSnap.data();
+                if (data.expiryDate && data.expiryDate.toDate() < now) {
+                    await db.collection("articles").doc(docSnap.id).delete();
+                    deleted++;
+                }
+            });
+            document.getElementById('cleanupResult').innerHTML = `<p class="text-green-600">🗑️ ${deleted} articles expirés supprimés</p>`;
+            loadStats();
+        };
+
+        window.showTab = (tab) => {
+            document.getElementById('articlesTab').classList.add('hidden');
+            document.getElementById('notesTab').classList.add('hidden');
+            document.getElementById('importTab').classList.add('hidden');
+            document.getElementById('cleanupTab').classList.add('hidden');
+            document.getElementById(tab + 'Tab').classList.remove('hidden');
+            ['articles', 'notes', 'import', 'cleanup'].forEach(b => {
+                const btn = document.getElementById('tab' + b.charAt(0).toUpperCase() + b.slice(1));
+                if (btn) { btn.classList.add('tab-inactive'); btn.classList.remove('tab-active'); }
+            });
+            const activeBtn = document.getElementById('tab' + tab.charAt(0).toUpperCase() + tab.slice(1));
+            if (activeBtn) { activeBtn.classList.add('tab-active'); activeBtn.classList.remove('tab-inactive'); }
+        };
+
+        // --- ECOUTEURS D'ÉVÉNEMENTS ---
+        document.getElementById('articleTitle')?.addEventListener('input', function() {
+            document.getElementById('previewTitle').innerText = this.value || "Titre de l'article";
+        });
+        
+        document.getElementById('articleContent')?.addEventListener('input', function() {
+            const text = this.value.replace(/\n/g, '<br>');
+            document.getElementById('previewContent').innerHTML = text || "Le contenu apparaîtra ici...";
+        });
+
+        document.getElementById('expiryType')?.addEventListener('change', (e) => {
+            const customInput = document.getElementById('customExpiry');
+            customInput.classList.toggle('hidden', e.target.value !== 'custom');
+        });
+
+        if (localStorage.getItem('admin_logged') === 'true') {
+            document.getElementById('loginScreen').classList.add('hidden');
+            document.getElementById('adminContent').classList.remove('hidden');
+            loadStats();
+            loadArticles();
+            loadAllNotes();
+        }
+
+        auth.onAuthStateChanged(async (user) => {
+            if (!user) await auth.signInAnonymously();
+        });
+    </script>
+</body>
+    </html>
+
