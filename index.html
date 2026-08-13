@@ -307,4 +307,431 @@
     let allFetchedUsers = [];
     const EXCLUDED_NAMES = ["Étudiant UTS", "Anonyme", "Test"];
 
-    
+        // ========== TOAST ==========
+    function showToast(m) {
+        const t = document.getElementById('uts-toast');
+        const msg = document.getElementById('toast-message');
+        if (t && msg) { msg.innerText = m; t.classList.add('show'); setTimeout(() => t.classList.remove('show'), 3000); }
+    }
+
+    // ========== NAVIGATION ==========
+    function switchView(v) {
+        const titles = { 'home': "Fil d'actualité", 'search': "Assistant IA", 'notes': "Mes notes", 'community': "Mes Amis", 'profile': "Mon Profil" };
+        const pageTitle = document.getElementById('pageTitle');
+        if (pageTitle && titles[v]) pageTitle.innerText = titles[v];
+
+        document.querySelectorAll('.view-section').forEach(s => s.classList.remove('active'));
+        const target = document.getElementById('view-' + v);
+        if (target) target.classList.add('active');
+        
+        document.querySelectorAll('.nav-btn').forEach(btn => {
+            btn.classList.remove('active-nav');
+            btn.classList.add('text-gray-400');
+        });
+        const activeBtn = document.getElementById('nav-' + v);
+        if (activeBtn) { activeBtn.classList.add('active-nav'); activeBtn.classList.remove('text-gray-400'); }
+        
+        if (v === 'home') loadInitialFeed();
+    }
+
+    function openSidebar() { document.getElementById('sidebar')?.classList.add('open'); document.getElementById('sidebarOverlay')?.classList.add('open'); }
+    function closeSidebar() { document.getElementById('sidebar')?.classList.remove('open'); document.getElementById('sidebarOverlay')?.classList.remove('open'); }
+    function openImageModal(src) { document.getElementById('modalImage').src = src; document.getElementById('imageModal').classList.remove('hidden'); }
+    function closeImageModal() { document.getElementById('imageModal').classList.add('hidden'); }
+    function openMediaModal(url, type) {
+        const content = document.getElementById('mediaContent');
+        content.innerHTML = type === 'video' 
+            ? `<video src="${url}" controls autoplay class="max-w-full max-h-[80vh] rounded-lg"></video>`
+            : `<img src="${url}" class="max-w-full max-h-[80vh] rounded-lg">`;
+        document.getElementById('mediaModal').classList.remove('hidden');
+    }
+    function closeMediaModal() { document.getElementById('mediaContent').innerHTML = ''; document.getElementById('mediaModal').classList.add('hidden'); }
+    function handleLogout() { if (confirm("Voulez-vous vraiment vous déconnecter ?")) { auth.signOut().then(() => { localStorage.clear(); location.reload(); }).catch(() => { localStorage.clear(); location.reload(); }); } }
+
+    // ========== ARTICLES (SCROLL INFINI) ==========
+    async function loadMoreArticles() {
+        if (isLoadingMore || allArticlesLoaded) return;
+        isLoadingMore = true;
+        
+        let q = db.collection("articles").orderBy("createdAt", "desc").limit(5);
+        if (lastArticleDoc) q = db.collection("articles").orderBy("createdAt", "desc").startAfter(lastArticleDoc).limit(5);
+        
+        try {
+            const snap = await q.get();
+            if (snap.empty) { allArticlesLoaded = true; document.getElementById('load-more-container')?.classList.add('hidden'); isLoadingMore = false; return; }
+            
+            lastArticleDoc = snap.docs[snap.docs.length - 1];
+            const feed = document.getElementById('news-feed');
+            
+            snap.forEach(doc => {
+                const art = doc.data();
+                const titre = art.title || art.titre || "";
+                const contenu = art.content || art.contenu || art.texte || "";
+                const image = art.imageUrl || art.image || null;
+                const imgHtml = image ? `<img src="${image}" class="w-full h-auto max-h-64 object-cover rounded-xl mb-3 mt-1" onerror="this.style.display='none'">` : '';
+                
+                feed.innerHTML += `
+                    <div class="bg-white rounded-3xl overflow-hidden shadow-sm border border-gray-100 mb-4">
+                        <div class="p-5">
+                            ${titre ? `<h3 class="font-black text-lg text-gray-800 mb-1">${titre.replace(/</g, '&lt;')}</h3>` : ''}
+                            ${imgHtml}
+                            <p class="text-sm text-gray-600 leading-relaxed">${contenu.replace(/\n/g, '<br>').replace(/</g, '&lt;')}</p>
+                        </div>
+                    </div>`;
+            });
+            
+            if (snap.docs.length < 5) allArticlesLoaded = true;
+            document.getElementById('load-more-container')?.classList.toggle('hidden', allArticlesLoaded);
+        } catch (e) { }
+        isLoadingMore = false;
+    }
+
+    function loadInitialFeed() {
+        lastArticleDoc = null; allArticlesLoaded = false;
+        document.getElementById('news-feed').innerHTML = '';
+        loadMoreArticles();
+    }
+
+    // ========== STORIES (TYPE WHATSAPP) ==========
+    async function postStory(e) {
+        const file = e.target.files[0];
+        if (!file || !currentUser) return showToast("❌ Connectez-vous d'abord");
+        
+        const isVideo = file.type.startsWith('video/');
+        const isImage = file.type.startsWith('image/');
+        if (!isVideo && !isImage) return showToast("❌ Images ou vidéos uniquement");
+        
+        // Limites : image 200KB, vidéo 1min30 (vérifiée côté client)
+        if (isVideo) {
+            // Vérifier la durée de la vidéo
+            const video = document.createElement('video');
+            video.src = URL.createObjectURL(file);
+            await new Promise(resolve => { video.onloadedmetadata = resolve; });
+            if (video.duration > 90) return showToast("❌ Vidéo max 1min30 !");
+            if (file.size > 3 * 1024 * 1024) return showToast("❌ Vidéo max 3 Mo");
+        } else {
+            if (file.size > 200 * 1024) return showToast("❌ Image max 200KB");
+        }
+        
+        showToast("⏳ Publication...");
+        
+        try {
+            const userData = JSON.parse(localStorage.getItem('uts_user_data')) || {};
+            let fileToProcess = file;
+            
+            if (isImage) {
+                fileToProcess = await imageCompression(file, { maxSizeMB: 0.15, maxWidthOrHeight: 600, useWebWorker: true });
+            }
+            
+            const reader = new FileReader();
+            reader.readAsDataURL(fileToProcess);
+            reader.onloadend = async () => {
+                const author = `${userData.prenom || ''} ${userData.nom || ''}`.trim() || "Anonyme";
+                
+                await db.collection("stories").add({
+                    mediaUrl: reader.result,
+                    mediaType: isVideo ? 'video' : 'image',
+                    userName: author,
+                    userId: currentUser.uid,
+                    userAvatar: userData.avatar || 'https://cdn-icons-png.flaticon.com/512/149/149071.png',
+                    date: firebase.firestore.FieldValue.serverTimestamp(),
+                    views: 0,
+                    viewers: []
+                });
+                showToast("✨ Statut publié !");
+            };
+        } catch (error) { showToast("❌ Échec lors de la publication"); }
+        e.target.value = '';
+    }
+
+    function formatDateRelative(firebaseDate) {
+        if (!firebaseDate) return "À l'instant";
+        const dateJS = firebaseDate.toDate ? firebaseDate.toDate() : new Date(firebaseDate);
+        const diff = Math.floor((new Date() - dateJS) / 60000);
+        if (diff < 1) return "À l'instant";
+        if (diff < 60) return `${diff} min`;
+        if (diff < 1440) return `${Math.floor(diff / 60)}h`;
+        return "Hier";
+    }
+
+    function chargerDonneesGlobales() {
+        const now = new Date();
+
+        // Stories avec suppression auto 24h
+        db.collection("stories").orderBy("date", "desc").onSnapshot(snap => {
+            const container = document.getElementById('stories-container');
+            if (!container) return;
+            container.innerHTML = "";
+            groupedStories = {};
+
+            snap.forEach(d => {
+                const s = d.data();
+                s.id = d.id;
+                const storyDate = s.date ? s.date.toDate() : new Date();
+                if ((now - storyDate) > 86400000) { d.ref.delete(); return; }
+
+                if (!groupedStories[s.userId]) {
+                    groupedStories[s.userId] = {
+                        userName: s.userName || "Anonyme",
+                        userAvatar: s.userAvatar || "https://cdn-icons-png.flaticon.com/512/149/149071.png",
+                        stories: []
+                    };
+                }
+                groupedStories[s.userId].stories.push(s);
+            });
+
+            currentStoryUserIds = Object.keys(groupedStories);
+
+            currentStoryUserIds.forEach(uId => {
+                const uGroup = groupedStories[uId];
+                const lastStory = uGroup.stories[0];
+                const tempsRelatif = formatDateRelative(lastStory.date);
+
+                container.innerHTML += `
+                    <div class="flex-shrink-0 w-16 text-center cursor-pointer hover:scale-105 transition" onclick="openStoryViewer('${uId}')">
+                        <div class="w-14 h-14 rounded-full border-2 border-green-500 p-0.5 mx-auto relative overflow-hidden">
+                            <img src="${uGroup.userAvatar}" class="w-full h-full object-cover rounded-full">
+                        </div>
+                        <span class="text-[9px] mt-1 block truncate font-medium">${uGroup.userName}</span>
+                        <span class="text-[7px] text-gray-400 block -mt-1">${tempsRelatif}</span>
+                    </div>`;
+            });
+        });
+
+        db.collection("users").orderBy("date", "desc").onSnapshot(snap => updateFriendsList(snap.docs));
+    }
+
+    // ========== VISIONNEUSE DE STORIES ==========
+    function openStoryViewer(userId) {
+        currentUserIndex = currentStoryUserIds.indexOf(userId);
+        if (currentUserIndex === -1) return;
+        currentStoryIndex = 0;
+        document.getElementById('storyViewer').classList.remove('hidden');
+        renderStory();
+    }
+
+    function renderStory() {
+        clearTimeout(storyTimer);
+        const currentUserId = currentStoryUserIds[currentUserIndex];
+        const uGroup = groupedStories[currentUserId];
+        const story = uGroup.stories[currentStoryIndex];
+
+        document.getElementById('storyUserName').innerText = uGroup.userName;
+        document.getElementById('storyUserAvatar').src = uGroup.userAvatar;
+        document.getElementById('storyTime').innerText = formatDateRelative(story.date);
+        document.getElementById('storyViews').innerText = `${story.views || 0} vues`;
+
+        // Incrémenter les vues
+        const viewerId = currentUser ? currentUser.uid : 'anonymous';
+        if (!story.viewers || !story.viewers.includes(viewerId)) {
+            const newViewers = [...(story.viewers || []), viewerId];
+            db.collection("stories").doc(story.id).update({ views: newViewers.length, viewers: newViewers });
+        }
+
+        const deleteBtn = document.getElementById('deleteStoryBtn');
+        if (currentUser && story.userId === currentUser.uid) deleteBtn.classList.remove('hidden');
+        else deleteBtn.classList.add('hidden');
+
+        const progressContainer = document.getElementById('storyProgressContainer');
+        progressContainer.innerHTML = '';
+        uGroup.stories.forEach((_, idx) => {
+            const bar = document.createElement('div');
+            bar.className = 'story-progress-bar';
+            const fill = document.createElement('div');
+            fill.className = 'story-progress-fill';
+            if (idx < currentStoryIndex) fill.style.width = '100%';
+            if (idx === currentStoryIndex) fill.id = 'currentProgressFill';
+            bar.appendChild(fill);
+            progressContainer.appendChild(bar);
+        });
+
+        const wrapper = document.getElementById('storyMediaWrapper');
+        wrapper.innerHTML = '';
+        if (story.mediaType === 'video') {
+            wrapper.innerHTML = `<video id="activeStoryVideo" src="${story.mediaUrl}" autoplay playsinline class="max-w-full max-h-[75vh] object-contain rounded-xl"></video>`;
+            const video = document.getElementById('activeStoryVideo');
+            video.onended = () => nextStory();
+        } else {
+            wrapper.innerHTML = `<img src="${story.mediaUrl}" class="max-w-full max-h-[75vh] object-contain rounded-xl">`;
+            let fill = document.getElementById('currentProgressFill');
+            let width = 0;
+            storyTimer = setInterval(() => {
+                width += 2;
+                if (fill) fill.style.width = width + '%';
+                if (width >= 100) { clearInterval(storyTimer); nextStory(); }
+            }, 100);
+        }
+    }
+
+    function nextStory() {
+        clearTimeout(storyTimer);
+        const currentUserId = currentStoryUserIds[currentUserIndex];
+        const uGroup = groupedStories[currentUserId];
+
+        if (currentStoryIndex < uGroup.stories.length - 1) {
+            currentStoryIndex++;
+            renderStory();
+        } else if (currentUserIndex < currentStoryUserIds.length - 1) {
+            currentUserIndex++;
+            currentStoryIndex = 0;
+            renderStory();
+        } else {
+            closeStoryViewer();
+        }
+    }
+
+    function prevStory() {
+        clearTimeout(storyTimer);
+        if (currentStoryIndex > 0) {
+            currentStoryIndex--;
+            renderStory();
+        } else if (currentUserIndex > 0) {
+            currentUserIndex--;
+            const previousUserId = currentStoryUserIds[currentUserIndex];
+            currentStoryIndex = groupedStories[previousUserId].stories.length - 1;
+            renderStory();
+        }
+    }
+
+    function closeStoryViewer() {
+        clearTimeout(storyTimer);
+        document.getElementById('storyViewer').classList.add('hidden');
+    }
+
+    async function deleteCurrentStory() {
+        const currentUserId = currentStoryUserIds[currentUserIndex];
+        const story = groupedStories[currentUserId].stories[currentStoryIndex];
+        if (confirm("Voulez-vous vraiment supprimer ce statut ?")) {
+            await db.collection("stories").doc(story.id).delete();
+            showToast("🗑️ Statut supprimé !");
+            closeStoryViewer();
+        }
+    }
+
+    // ========== CHAT AVEC VOCAUX ET SUPPRESSION ==========
+    function startChat(amiId, amiNom) {
+        activeChatId = amiId;
+        document.getElementById('chatPartnerName').innerText = amiNom;
+        document.getElementById('chatWindow').classList.remove('hidden');
+        const roomId = [currentUser.uid, amiId].sort().join('_');
+        
+        if (unsubscribeChat) unsubscribeChat();
+        
+        unsubscribeChat = db.collection("messages")
+            .where("roomId", "==", roomId)
+            .orderBy("date", "asc")
+            .onSnapshot(snap => {
+                const box = document.getElementById('chatMessages');
+                if (!box) return;
+                box.innerHTML = "";
+                snap.forEach(doc => {
+                    const m = doc.data();
+                    const docId = doc.id;
+                    const isMe = m.senderId === currentUser.uid;
+                    const msgElement = document.createElement('div');
+                    
+                    msgElement.className = `max-w-[80%] chat-message ${isMe ? 'self-end bg-green-600 text-white rounded-l-2xl rounded-tr-2xl' : 'self-start bg-white border rounded-r-2xl rounded-tl-2xl shadow-sm'} p-3 text-sm flex flex-col`;
+                    
+                    if (isMe) {
+                        msgElement.onclick = () => deleteMessage(docId);
+                        msgElement.title = "Cliquer pour supprimer";
+                    }
+
+                    if (m.type === 'audio' || m.audioUrl) {
+                        msgElement.innerHTML = `<audio controls src="${m.audioUrl}" class="max-w-[200px]"></audio>`;
+                    } else if (m.type === 'file' && m.fileUrl) {
+                        if (m.fileType && m.fileType.startsWith('image/')) {
+                            msgElement.innerHTML = `<img src="${m.fileUrl}" class="max-w-[200px] rounded-lg cursor-pointer" onclick="openImageModal('${m.fileUrl}')">`;
+                        } else {
+                            msgElement.innerHTML = `<video src="${m.fileUrl}" controls class="max-w-[200px] rounded-lg"></video>`;
+                        }
+                    } else {
+                        msgElement.textContent = m.text || '';
+                    }
+
+                    if (isMe && m.text) {
+                        msgElement.innerHTML += `<span class="text-[7px] text-green-200 text-right mt-1 opacity-70">Supprimer</span>`;
+                    }
+                    
+                    box.appendChild(msgElement);
+                });
+                box.scrollTo({ top: box.scrollHeight, behavior: 'smooth' });
+            });
+    }
+
+    async function sendMessage() {
+        const input = document.getElementById('chatInput');
+        const text = input.value.trim();
+        if (!text || !activeChatId || !currentUser) return;
+        
+        const roomId = [currentUser.uid, activeChatId].sort().join('_');
+        input.value = "";
+        
+        await db.collection("messages").add({ 
+            roomId, 
+            senderId: currentUser.uid, 
+            text: text.replace(/</g, '&lt;').replace(/>/g, '&gt;'), 
+            type: 'text',
+            date: firebase.firestore.FieldValue.serverTimestamp() 
+        });
+    }
+
+    async function sendFileMessage(e) {
+        const file = e.target.files[0];
+        if (!file || !activeChatId || !currentUser) return;
+        
+        const isVideo = file.type.startsWith('video/');
+        const isImage = file.type.startsWith('image/');
+        if (!isImage && !isVideo) return showToast("❌ Images ou vidéos uniquement");
+        
+        if (isVideo && file.size > 10 * 1024 * 1024) return showToast("❌ Vidéo max 10 Mo");
+        if (isImage && file.size > 2 * 1024 * 1024) return showToast("❌ Image max 2 Mo");
+        
+        showToast("⏳ Envoi en cours...");
+        
+        try {
+            let fileToProcess = file;
+            if (isImage) {
+                fileToProcess = await imageCompression(file, { maxSizeMB: 0.2, maxWidthOrHeight: 800, useWebWorker: true });
+            }
+            
+            const reader = new FileReader();
+            reader.readAsDataURL(fileToProcess);
+            reader.onloadend = async () => {
+                const roomId = [currentUser.uid, activeChatId].sort().join('_');
+                await db.collection("messages").add({
+                    roomId,
+                    senderId: currentUser.uid,
+                    fileUrl: reader.result,
+                    fileType: file.type,
+                    type: 'file',
+                    date: firebase.firestore.FieldValue.serverTimestamp()
+                });
+                showToast("📎 Fichier envoyé !");
+            };
+        } catch (error) { showToast("❌ Échec d'envoi"); }
+        e.target.value = '';
+    }
+
+    async function deleteMessage(messageId) {
+        if (confirm("Voulez-vous supprimer ce message pour tout le monde ?")) {
+            try {
+                await db.collection("messages").doc(messageId).delete();
+                showToast("🗑️ Message supprimé !");
+            } catch (e) { showToast("❌ Échec lors de la suppression"); }
+        }
+    }
+
+    function closeChat() {
+        document.getElementById('chatWindow').classList.add('hidden');
+        if (unsubscribeChat) unsubscribeChat();
+    }
+
+    // ========== MESSAGES VOCAUX ==========
+    async function toggleVoiceRecord() {
+        const btn = document.getElementById('voiceBtn');
+        const cancelBtn = document.getElementById('cancelVoiceBtn');
+        
+        if (!isRecording) {
+            try {
+                
