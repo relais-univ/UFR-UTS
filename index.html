@@ -284,4 +284,443 @@
             <div class="mt-3">
                 <label class="text-xs font-bold text-gray-600">Début: <span id="startTimeLabel">0s</span></label>
                 <input type="range" id="startSlider" class="range-slider" min="0" max="100" value="0">
-                <label class="text-xs font-bold text-gray-600">Fin: <span id="endTimeL
+                <label class="text-xs font-bold text-gray-600">Fin: <span id="endTimeLAbel">0s</span></label>
+                <input type="range" id="endSlider" class="range-slider" min="0" max="100" value="100">
+            </div>
+            <div class="flex gap-2 mt-3">
+                <button onclick="trimVideo()" class="flex-1 uts-green text-white py-3 rounded-2xl font-bold">✅ Publier</button>
+                <button onclick="closeVideoEditor()" class="flex-1 bg-gray-200 text-gray-700 py-3 rounded-2xl font-bold">Annuler</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+    // ========== CONFIGURATION FIREBASE ==========
+    const firebaseConfig = {
+        apiKey: "AIzaSyDXmjqF1DvqF0k8-YCUY-MHjyxRf6CBU78",
+        authDomain: "uts-e6211.firebaseapp.com",
+        projectId: "uts-e6211",
+        storageBucket: "uts-e6211.firebasestorage.app",
+        messagingSenderId: "520201058732",
+        appId: "1:520201058732:web:d2beaf37f46f7cd6daa209"
+    };
+
+    if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
+    const db = firebase.firestore();
+    const auth = firebase.auth();
+    const storage = firebase.storage();
+
+    // ========== VARIABLES GLOBALES ==========
+    let currentUser = null;
+    let activeChatId = null;
+    let unsubscribeChat = null;
+    let lastArticleDoc = null;
+    let isLoadingMore = false;
+    let allArticlesLoaded = false;
+    let aiConfig = null;
+    let lastAskTime = 0;
+
+    // Stories
+    let groupedStories = {};
+    let currentStoryUserIds = [];
+    let currentUserIndex = 0;
+    let currentStoryIndex = 0;
+    let storyTimer = null;
+
+    // Audio
+    let mediaRecorder = null;
+    let audioChunks = [];
+    let isRecording = false;
+    let isVoiceCancelled = false;
+
+    // Éditeur vidéo
+    let videoFileToEdit = null;
+    let videoStartTime = 0;
+    let videoEndTime = 0;
+    let videoDuration = 0;
+    let isProcessingVideo = false;
+
+    let allFetchedUsers = [];
+    const EXCLUDED_NAMES = ["Étudiant UTS", "Anonyme", "Test"];
+
+    // ========== TOAST ==========
+    function showToast(m) {
+        const t = document.getElementById('uts-toast');
+        const msg = document.getElementById('toast-message');
+        if (t && msg) { msg.innerText = m; t.classList.add('show'); setTimeout(() => t.classList.remove('show'), 3000); }
+    }
+
+    // ========== NAVIGATION ==========
+    function switchView(v) {
+        const titles = { 'home': "Fil d'actualité", 'search': "Assistant IA", 'notes': "Mes notes", 'community': "Mes Amis", 'profile': "Mon Profil" };
+        const pageTitle = document.getElementById('pageTitle');
+        if (pageTitle && titles[v]) pageTitle.innerText = titles[v];
+
+        document.querySelectorAll('.view-section').forEach(s => s.classList.remove('active'));
+        const target = document.getElementById('view-' + v);
+        if (target) target.classList.add('active');
+        
+        document.querySelectorAll('.nav-btn').forEach(btn => {
+            btn.classList.remove('active-nav');
+            btn.classList.add('text-gray-400');
+        });
+        const activeBtn = document.getElementById('nav-' + v);
+        if (activeBtn) { activeBtn.classList.add('active-nav'); activeBtn.classList.remove('text-gray-400'); }
+        
+        if (v === 'home') loadInitialFeed();
+    }
+
+    function openSidebar() { document.getElementById('sidebar')?.classList.add('open'); document.getElementById('sidebarOverlay')?.classList.add('open'); }
+    function closeSidebar() { document.getElementById('sidebar')?.classList.remove('open'); document.getElementById('sidebarOverlay')?.classList.remove('open'); }
+    function openImageModal(src) { document.getElementById('modalImage').src = src; document.getElementById('imageModal').classList.remove('hidden'); }
+    function closeImageModal() { document.getElementById('imageModal').classList.add('hidden'); }
+    function openMediaModal(url, type) {
+        const content = document.getElementById('mediaContent');
+        content.innerHTML = type === 'video' 
+            ? `<video src="${url}" controls autoplay class="max-w-full max-h-[80vh] rounded-lg"></video>`
+            : `<img src="${url}" class="max-w-full max-h-[80vh] rounded-lg">`;
+        document.getElementById('mediaModal').classList.remove('hidden');
+    }
+    function closeMediaModal() { document.getElementById('mediaContent').innerHTML = ''; document.getElementById('mediaModal').classList.add('hidden'); }
+    function handleLogout() { if (confirm("Voulez-vous vraiment vous déconnecter ?")) { auth.signOut().then(() => { localStorage.clear(); location.reload(); }).catch(() => { localStorage.clear(); location.reload(); }); } }
+
+    // ========== ARTICLES ==========
+    async function loadMoreArticles() {
+        if (isLoadingMore || allArticlesLoaded) return;
+        isLoadingMore = true;
+        
+        let q = db.collection("articles").orderBy("createdAt", "desc").limit(5);
+        if (lastArticleDoc) q = db.collection("articles").orderBy("createdAt", "desc").startAfter(lastArticleDoc).limit(5);
+        
+        try {
+            const snap = await q.get();
+            if (snap.empty) { allArticlesLoaded = true; document.getElementById('load-more-container')?.classList.add('hidden'); isLoadingMore = false; return; }
+            
+            lastArticleDoc = snap.docs[snap.docs.length - 1];
+            const feed = document.getElementById('news-feed');
+            
+            snap.forEach(doc => {
+                const art = doc.data();
+                const titre = art.title || art.titre || "";
+                const contenu = art.content || art.contenu || art.texte || "";
+                const image = art.imageUrl || art.image || null;
+                const imgHtml = image ? `<img src="${image}" class="w-full h-auto max-h-64 object-cover rounded-xl mb-3 mt-1" onerror="this.style.display='none'">` : '';
+                
+                feed.innerHTML += `
+                    <div class="bg-white rounded-3xl overflow-hidden shadow-sm border border-gray-100 mb-4">
+                        <div class="p-5">
+                            ${titre ? `<h3 class="font-black text-lg text-gray-800 mb-1">${titre.replace(/</g, '&lt;')}</h3>` : ''}
+                            ${imgHtml}
+                            <p class="text-sm text-gray-600 leading-relaxed">${contenu.replace(/\n/g, '<br>').replace(/</g, '&lt;')}</p>
+                        </div>
+                    </div>`;
+            });
+            
+            if (snap.docs.length < 5) allArticlesLoaded = true;
+            document.getElementById('load-more-container')?.classList.toggle('hidden', allArticlesLoaded);
+        } catch (e) { }
+        isLoadingMore = false;
+    }
+
+    function loadInitialFeed() {
+        lastArticleDoc = null; allArticlesLoaded = false;
+        document.getElementById('news-feed').innerHTML = '';
+        loadMoreArticles();
+    }
+
+    // ========== STORIES AVEC ÉDITEUR VIDÉO ==========
+    function handleStoryFile(e) {
+        const file = e.target.files[0];
+        if (!file || !currentUser) return showToast("❌ Connectez-vous d'abord");
+        
+        const isVideo = file.type.startsWith('video/');
+        const isImage = file.type.startsWith('image/');
+        if (!isVideo && !isImage) return showToast("❌ Images ou vidéos uniquement");
+        
+        if (isImage) {
+            postImageStory(file);
+        } else {
+            openVideoEditor(file);
+        }
+        e.target.value = '';
+    }
+
+    async function postImageStory(file) {
+        if (file.size > 200 * 1024) {
+            showToast("⏳ Compression de l'image...");
+        }
+        
+        try {
+            const userData = JSON.parse(localStorage.getItem('uts_user_data')) || {};
+            let fileToProcess = file;
+            
+            if (file.size > 200 * 1024) {
+                fileToProcess = await imageCompression(file, { maxSizeMB: 0.15, maxWidthOrHeight: 600, useWebWorker: true });
+            }
+            
+            const reader = new FileReader();
+            reader.readAsDataURL(fileToProcess);
+            reader.onloadend = async () => {
+                const author = `${userData.prenom || ''} ${userData.nom || ''}`.trim() || "Anonyme";
+                
+                await db.collection("stories").add({
+                    mediaUrl: reader.result,
+                    mediaType: 'image',
+                    userName: author,
+                    userId: currentUser.uid,
+                    userAvatar: userData.avatar || 'https://cdn-icons-png.flaticon.com/512/149/149071.png',
+                    date: firebase.firestore.FieldValue.serverTimestamp(),
+                    views: 0,
+                    viewers: []
+                });
+                showToast("✨ Story publiée !");
+            };
+        } catch (error) { showToast("❌ Échec lors de la publication"); }
+    }
+
+    // ========== ÉDITEUR VIDÉO ==========
+    function openVideoEditor(file) {
+        videoFileToEdit = file;
+        const video = document.getElementById('editorVideo');
+        video.src = URL.createObjectURL(file);
+        video.onloadedmetadata = function() {
+            videoDuration = video.duration;
+            videoStartTime = 0;
+            videoEndTime = Math.min(videoDuration, 90);
+            document.getElementById('startTimeLabel').textContent = '0s';
+            document.getElementById('endTimeLabel').textContent = Math.floor(videoEndTime) + 's';
+            document.getElementById('startSlider').max = Math.floor(videoDuration);
+            document.getElementById('endSlider').max = Math.floor(videoDuration);
+            document.getElementById('startSlider').value = 0;
+            document.getElementById('endSlider').value = Math.min(90, videoDuration);
+            document.getElementById('videoEditorModal').classList.add('active');
+        };
+    }
+
+    function closeVideoEditor() {
+        document.getElementById('videoEditorModal').classList.remove('active');
+        videoFileToEdit = null;
+        const video = document.getElementById('editorVideo');
+        video.pause();
+        video.src = '';
+    }
+
+    // Sliders
+    document.getElementById('startSlider').addEventListener('input', function() {
+        const val = parseFloat(this.value);
+        document.getElementById('startTimeLabel').textContent = Math.floor(val) + 's';
+        document.getElementById('editorVideo').currentTime = val;
+        videoStartTime = val;
+    });
+
+    document.getElementById('endSlider').addEventListener('input', function() {
+        const val = parseFloat(this.value);
+        document.getElementById('endTimeLabel').textContent = Math.floor(val) + 's';
+        videoEndTime = Math.min(val, 90);
+        if (videoEndTime <= videoStartTime) videoEndTime = videoStartTime + 1;
+    });
+
+    // ========== TRIM VIDÉO AVEC FFMPEG ==========
+    async function trimVideo() {
+        if (isProcessingVideo) return;
+        
+        const start = videoStartTime;
+        const end = Math.min(videoEndTime, videoStartTime + 90);
+        const duration = end - start;
+        
+        if (duration < 1) return showToast("❌ Vidéo trop courte !");
+        if (duration > 90) return showToast("❌ Max 1min30 !");
+        
+        isProcessingVideo = true;
+        showToast("⏳ Traitement vidéo...");
+        
+        try {
+            const { createFFmpeg, fetchFile } = FFmpeg;
+            const ffmpeg = createFFmpeg({ log: false });
+            await ffmpeg.load();
+            
+            const name = 'input.mp4';
+            ffmpeg.FS('writeFile', name, await fetchFile(videoFileToEdit));
+            
+            await ffmpeg.run('-i', name, '-ss', start.toString(), '-t', duration.toString(), '-c', 'copy', 'output.mp4');
+            
+            const data = ffmpeg.FS('readFile', 'output.mp4');
+            const trimmedBlob = new Blob([data.buffer], { type: 'video/mp4' });
+            
+            if (trimmedBlob.size > 3 * 1024 * 1024) {
+                showToast("⏳ Compression vidéo...");
+                ffmpeg.FS('writeFile', 'input2.mp4', await fetchFile(trimmedBlob));
+                await ffmpeg.run('-i', 'input2.mp4', '-vf', 'scale=640:-2', '-b:v', '500k', '-c:a', 'aac', 'compressed.mp4');
+                const compressedData = ffmpeg.FS('readFile', 'compressed.mp4');
+                const finalBlob = new Blob([compressedData.buffer], { type: 'video/mp4' });
+                await publishVideoStory(finalBlob);
+            } else {
+                await publishVideoStory(trimmedBlob);
+            }
+            
+            closeVideoEditor();
+        } catch (error) {
+            console.error(error);
+            showToast("❌ Erreur de traitement, publication en mode simple...");
+            await publishVideoStory(videoFileToEdit);
+            closeVideoEditor();
+        }
+        
+        isProcessingVideo = false;
+    }
+
+    async function publishVideoStory(blob) {
+        try {
+            const userData = JSON.parse(localStorage.getItem('uts_user_data')) || {};
+            const reader = new FileReader();
+            reader.readAsDataURL(blob);
+            reader.onloadend = async () => {
+                const author = `${userData.prenom || ''} ${userData.nom || ''}`.trim() || "Anonyme";
+                
+                await db.collection("stories").add({
+                    mediaUrl: reader.result,
+                    mediaType: 'video',
+                    userName: author,
+                    userId: currentUser.uid,
+                    userAvatar: userData.avatar || 'https://cdn-icons-png.flaticon.com/512/149/149071.png',
+                    date: firebase.firestore.FieldValue.serverTimestamp(),
+                    views: 0,
+                    viewers: []
+                });
+                showToast("✨ Vidéo publiée !");
+            };
+        } catch (error) {
+            showToast("❌ Échec de publication");
+        }
+    }
+
+    function formatDateRelative(firebaseDate) {
+        if (!firebaseDate) return "À l'instant";
+        const dateJS = firebaseDate.toDate ? firebaseDate.toDate() : new Date(firebaseDate);
+        const diff = Math.floor((new Date() - dateJS) / 60000);
+        if (diff < 1) return "À l'instant";
+        if (diff < 60) return `${diff} min`;
+        if (diff < 1440) return `${Math.floor(diff / 60)}h`;
+        return "Hier";
+    }
+
+    function chargerDonneesGlobales() {
+        const now = new Date();
+
+        db.collection("stories").orderBy("date", "desc").onSnapshot(snap => {
+            const container = document.getElementById('stories-container');
+            if (!container) return;
+            container.innerHTML = "";
+            groupedStories = {};
+
+            snap.forEach(d => {
+                const s = d.data();
+                s.id = d.id;
+                const storyDate = s.date ? s.date.toDate() : new Date();
+                if ((now - storyDate) > 86400000) { d.ref.delete(); return; }
+
+                if (!groupedStories[s.userId]) {
+                    groupedStories[s.userId] = {
+                        userName: s.userName || "Anonyme",
+                        userAvatar: s.userAvatar || "https://cdn-icons-png.flaticon.com/512/149/149071.png",
+                        stories: []
+                    };
+                }
+                groupedStories[s.userId].stories.push(s);
+            });
+
+            currentStoryUserIds = Object.keys(groupedStories);
+
+            currentStoryUserIds.forEach(uId => {
+                const uGroup = groupedStories[uId];
+                const lastStory = uGroup.stories[0];
+                const tempsRelatif = formatDateRelative(lastStory.date);
+                // Afficher "Vous" si c'est le propriétaire
+                const displayName = (currentUser && uId === currentUser.uid) ? "Vous" : uGroup.userName;
+
+                container.innerHTML += `
+                    <div class="flex-shrink-0 w-16 text-center cursor-pointer hover:scale-105 transition" onclick="openStoryViewer('${uId}')">
+                        <div class="w-14 h-14 rounded-full border-2 border-green-500 p-0.5 mx-auto relative overflow-hidden">
+                            <img src="${uGroup.userAvatar}" class="w-full h-full object-cover rounded-full">
+                        </div>
+                        <span class="text-[9px] mt-1 block truncate font-medium">${displayName}</span>
+                        <span class="text-[7px] text-gray-400 block -mt-1">${tempsRelatif}</span>
+                    </div>`;
+            });
+        });
+
+        db.collection("users").orderBy("date", "desc").onSnapshot(snap => updateFriendsList(snap.docs));
+    }
+
+    // ========== VISIONNEUSE DE STORIES ==========
+    function openStoryViewer(userId) {
+        currentUserIndex = currentStoryUserIds.indexOf(userId);
+        if (currentUserIndex === -1) return;
+        currentStoryIndex = 0;
+        document.getElementById('storyViewer').classList.remove('hidden');
+        renderStory();
+    }
+
+    function renderStory() {
+        clearTimeout(storyTimer);
+        const currentUserId = currentStoryUserIds[currentUserIndex];
+        const uGroup = groupedStories[currentUserId];
+        const story = uGroup.stories[currentStoryIndex];
+
+        // Afficher "Vous" si c'est le propriétaire
+        const displayName = (currentUser && currentUserId === currentUser.uid) ? "Vous" : uGroup.userName;
+        document.getElementById('storyUserName').innerText = displayName;
+        document.getElementById('storyUserAvatar').src = uGroup.userAvatar;
+        document.getElementById('storyTime').innerText = formatDateRelative(story.date);
+        document.getElementById('storyViews').innerText = `${story.views || 0} vues`;
+
+        const viewerId = currentUser ? currentUser.uid : 'anonymous';
+        if (!story.viewers || !story.viewers.includes(viewerId)) {
+            const newViewers = [...(story.viewers || []), viewerId];
+            db.collection("stories").doc(story.id).update({ views: newViewers.length, viewers: newViewers });
+        }
+
+        const deleteBtn = document.getElementById('deleteStoryBtn');
+        if (currentUser && story.userId === currentUser.uid) deleteBtn.classList.remove('hidden');
+        else deleteBtn.classList.add('hidden');
+
+        const progressContainer = document.getElementById('storyProgressContainer');
+        progressContainer.innerHTML = '';
+        uGroup.stories.forEach((_, idx) => {
+            const bar = document.createElement('div');
+            bar.className = 'story-progress-bar';
+            const fill = document.createElement('div');
+            fill.className = 'story-progress-fill';
+            if (idx < currentStoryIndex) fill.style.width = '100%';
+            if (idx === currentStoryIndex) fill.id = 'currentProgressFill';
+            bar.appendChild(fill);
+            progressContainer.appendChild(bar);
+        });
+
+        const wrapper = document.getElementById('storyMediaWrapper');
+        wrapper.innerHTML = '';
+        if (story.mediaType === 'video') {
+            wrapper.innerHTML = `<video id="activeStoryVideo" src="${story.mediaUrl}" autoplay playsinline class="max-w-full max-h-[75vh] object-contain rounded-xl"></video>`;
+            const video = document.getElementById('activeStoryVideo');
+            video.onended = () => nextStory();
+        } else {
+            wrapper.innerHTML = `<img src="${story.mediaUrl}" class="max-w-full max-h-[75vh] object-contain rounded-xl">`;
+            let fill = document.getElementById('currentProgressFill');
+            let width = 0;
+            storyTimer = setInterval(() => {
+                width += 2;
+                if (fill) fill.style.width = width + '%';
+                if (width >= 100) { clearInterval(storyTimer); nextStory(); }
+            }, 100);
+        }
+    }
+
+    function nextStory() {
+        clearTimeout(storyTimer);
+        const currentUserId = currentStoryUserIds[currentUserIndex];
+        const uGroup = groupedStories[currentUserId];
+
+        if (currentStoryIndex < uGroup.stories.length - 1) {
+            currentStoryIndex++;
+            renderStory();
+        } else if (currentUserInd
