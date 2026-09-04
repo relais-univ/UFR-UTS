@@ -281,7 +281,14 @@
         </div>
     </div>
 
-    
+    <!-- Navigation -->
+<nav class="fixed bottom-0 left-0 right-0 bg-white/90 backdrop-blur-md border-t p-2 flex justify-around shadow-2xl z-50">
+    <button onclick="switchView('home')" id="nav-home" class="nav-btn flex flex-col items-center p-2 active-nav"><i class="fas fa-home text-xl"></i><span class="text-[9px] font-bold mt-1">Accueil</span></button>
+    <button onclick="switchView('search')" id="nav-search" class="nav-btn flex flex-col items-center p-2 text-gray-400"><i class="fas fa-link text-xl"></i><span class="text-[9px] font-bold mt-1">Ressources</span></button>
+    <button onclick="switchView('notes')" id="nav-notes" class="nav-btn flex flex-col items-center p-2 text-gray-400"><i class="fas fa-graduation-cap text-xl"></i><span class="text-[9px] font-bold mt-1">Notes</span></button>
+    <button onclick="switchView('community')" id="nav-community" class="nav-btn flex flex-col items-center p-2 text-gray-400"><i class="fas fa-users text-xl"></i><span class="text-[9px] font-bold mt-1">Amis</span></button>
+    <button onclick="switchView('profile')" id="nav-profile" class="nav-btn flex flex-col items-center p-2 text-gray-400"><i class="fas fa-user-circle text-xl"></i><span class="text-[9px] font-bold mt-1">Profil</span></button>
+</nav>
 
     <!-- Modals -->
     <div id="imageModal" class="hidden fixed inset-0 z-[200] bg-black/90 flex items-center justify-center p-4" onclick="closeImageModal()">
