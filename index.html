@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>UTS Social - Officiel</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <link rel="manifest" href="manifest.json">
+    <link rel="apple-touch-icon" sizes="192x192" href="logo-192.png">
+    <link rel="icon" type="image/png" sizes="512x512" href="logo-512.png">
+    <script src="https://cdn.jsdelivr.net/npm/browser-image-compression@2.0.2/dist/browser-image-compression.min.js"></script>
+    <!-- FFmpeg pour l'édition vidéo -->
+    <script src="https://cdn.jsdelivr.net/npm/@ffmpeg/ffmpeg@0.12.10/dist/ffmpeg.min.js"></script>
+    
+    <script src="https://www.gstatic.com/firebasejs/11.0.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/11.0.0/firebase-firestore-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/11.0.0/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/11.0.0/firebase-storage-compat.js"></script>
+    
+    <style>
+        .uts-green { background-color: #008751; }
+        .active-nav { color: #008751 !important; border-top: 3px solid #008751; }
+        .view-section { display: none; }
+        .view-section.active { display: block; animation: fadeIn 0.25s ease-out; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+        .card-shadow { box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.1); }
+        .input-pro { width: 100%; background: #f3f4f6; border-radius: 15px; padding: 12px 15px; border: 2px solid transparent; outline: none; transition: 0.3s; font-size: 14px; }
+        .input-pro:focus { border-color: #008751; background: white; }
+        .uts-logo { background: white; }
+        .uts-logo span:nth-child(1) { color: #EF4444; }
+        .uts-logo span:nth-child(2) { color: #EAB308; }
+        .uts-logo span:nth-child(3) { color: #22C55E; }
+        .no-scrollbar::-webkit-scrollbar { display: none; }
+        
+        #uts-toast { 
+            position: fixed; bottom: 100px; left: 50%; transform: translateX(-50%) translateY(100px); 
+            background: #1f2937; color: white; padding: 12px 24px; border-radius: 50px; 
+            font-weight: 600; font-size: 13px; z-index: 1000; transition: all 0.4s ease; 
+            opacity: 0; display: flex; align-items: center; gap: 10px; box-shadow: 0 10px 15px rgba(0,0,0,0.3);
+        }
+        #uts-toast.show { transform: translateX(-50%) translateY(0); opacity: 1; }
+
+        .sidebar { position: fixed; top: 0; left: -280px; width: 280px; height: 100%; background: white; z-index: 300; transition: left 0.3s ease; box-shadow: 2px 0 10px rgba(0,0,0,0.1); overflow-y: auto; }
+        .sidebar.open { left: 0; }
+        .sidebar-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 299; display: none; }
+        .sidebar-overlay.open { display: block; }
+        .menu-item { padding: 12px 20px; border-bottom: 1px solid #e5e7eb; cursor: pointer; transition: background 0.2s; }
+        .menu-item:hover { background: #f3f4f6; }
+        
+        .chat-message { animation: messageSlide 0.2s ease; cursor: pointer; }
+        @keyframes messageSlide { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+        
+        .story-progress-bar { height: 3px; background: rgba(255,255,255,0.4); flex: 1; border-radius: 2px; overflow: hidden; margin: 0 1px; }
+        .story-progress-fill { height: 100%; background: white; width: 0%; transition: width 0.1s linear; }
+        
+        .media-modal-content video, .media-modal-content img { max-width: 100%; max-height: 80vh; border-radius: 16px; }
+        
+        .recording-pulse { animation: pulse 0.8s infinite; }
+        @keyframes pulse { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.1); } }
+
+        /* Modal éditeur vidéo */
+        #videoEditorModal {
+            position: fixed; inset: 0; z-index: 400; background: rgba(0,0,0,0.8);
+            display: none; align-items: center; justify-content: center;
+        }
+        #videoEditorModal.active { display: flex; }
+        .editor-container { background: white; border-radius: 30px; max-width: 500px; width: 100%; padding: 20px; max-height: 90vh; overflow-y: auto; }
+        .editor-container video { width: 100%; border-radius: 16px; background: black; max-height: 300px; }
+        .range-slider { width: 100%; accent-color: #008751; }
+    </style>
+</head>
+<body class="bg-gray-100 font-sans pb-24">
+
+    <div id="uts-toast"><i class="fas fa-info-circle text-yellow-400"></i><span id="toast-message"></span></div>
+
+    <div id="sidebarOverlay" class="sidebar-overlay" onclick="closeSidebar()"></div>
+    <div id="sidebar" class="sidebar">
+        <div class="uts-green text-white p-4 text-center font-bold">Menu UTS</div>
+        <div class="menu-item" onclick="closeSidebar(); switchView('home')"><i class="fas fa-home w-6"></i> Accueil</div>
+        <div class="menu-item" onclick="closeSidebar(); switchView('search')"><i class="fas fa-link w-6"></i> Ressources</div>
+        <div class="menu-item" onclick="closeSidebar(); switchView('notes')"><i class="fas fa-graduation-cap w-6"></i> Mes notes</div>
+        <div class="menu-item" onclick="closeSidebar(); switchView('community')"><i class="fas fa-users w-6"></i> Amis</div>
+        <div class="menu-item" onclick="closeSidebar(); switchView('profile')"><i class="fas fa-user-circle w-6"></i> Mon profil</div>
+        <div class="menu-item text-red-600 font-bold" onclick="closeSidebar(); handleLogout()"><i class="fas fa-sign-out-alt w-6"></i> Déconnexion</div>
+    </div>
+
+    <header class="uts-green text-white p-4 sticky top-0 z-50 shadow-md flex justify-between items-center">
+        <div class="flex items-center gap-2">
+            <i class="fas fa-bars text-xl cursor-pointer hover:text-green-200" onclick="openSidebar()"></i>
+            <div class="uts-logo w-10 h-10 bg-white rounded-full flex items-center justify-center text-xl font-bold"><span>U</span><span>T</span><span>S</span></div>
+            <div>
+                <h1 id="pageTitle" class="text-lg font-bold">Fil d'actualité</h1>
+                <div class="flex items-center gap-1 text-xs"><i id="statusIcon" class="fas fa-circle text-green-400 text-[8px]"></i><span id="statusText" class="text-green-200 text-[10px]">En ligne</span></div>
+            </div>
+        </div>
+        <div class="flex gap-4">
+            <i class="fas fa-bell text-xl"></i>
+            <i class="fas fa-paper-plane text-xl cursor-pointer" onclick="switchView('community')"></i>
+            <button onclick="installApp()" id="installBtn" class="text-sm bg-white text-green-700 px-3 py-1 rounded-full font-bold hover:bg-green-100 transition shadow flex items-center gap-1">⬇️ App</button>
+        </div>
+    </header>
+
+    <main class="max-w-md mx-auto p-4">
+        <!-- Accueil -->
+        <section id="view-home" class="view-section active space-y-4">
+            <div class="bg-white rounded-3xl p-6 shadow-sm border border-gray-100 text-center">
+                <img src="thomas-sankara.jpg" alt="Thomas Sankara" class="w-40 h-40 rounded-full mx-auto object-cover border-4 border-green-500 shadow-md cursor-pointer hover:scale-105 transition-transform duration-300" onclick="openImageModal(this.src)">
+                <h3 class="font-bold text-green-700 text-xl mt-3">Thomas Sankara</h3>
+                <p class="text-sm text-gray-600 italic mt-1">"Il faut oser lutter, oser vaincre"</p>
+            </div>
+            <div id="articles-container" class="space-y-4"></div>
+            <div id="news-feed" class="space-y-4 mt-4 pb-4"></div>
+            <div id="load-more-container" class="text-center hidden">
+                <button id="load-more-btn" onclick="loadMoreArticles()" class="bg-gray-200 hover:bg-gray-300 text-gray-700 px-6 py-2 rounded-full text-sm font-bold transition">Voir plus ⬇️</button>
+            </div>
+        </section>
+
+        <!-- Ressources UTS -->
+        <section id="view-search" class="view-section">
+            <div class="bg-white p-6 rounded-[35px] card-shadow">
+                <div class="text-center mb-5">
+                    <div class="text-4xl mb-2">🎓</div>
+                    <h2 class="text-xl font-black text-gray-800">Ressources UTS</h2>
+                    <p class="text-sm text-gray-500">Accès rapide aux plateformes</p>
+                </div>
+                
+                <div class="space-y-3">
+                    <!-- Lien 1 : Campus Faso -->
+                    <a href="https://campusfaso.bf" target="_blank" 
+                       class="flex items-center justify-between bg-green-50 border border-green-200 p-4 rounded-2xl hover:bg-green-100 transition group">
+                        <div class="flex items-center gap-3">
+                            <div class="w-10 h-10 rounded-full bg-green-100 flex items-center justify-center text-green-600 text-lg">🏛️</div>
+                            <div>
+                                <span class="font-bold text-gray-800 block">Campus Faso</span>
+                                <span class="text-[10px] text-gray-500">Portail principal</span>
+                            </div>
+                        </div>
+                        <i class="fas fa-arrow-right text-green-500 group-hover:translate-x-1 transition"></i>
+                    </a>
+                    
+                    <!-- Lien 2 : Système LMD -->
+                    <a href="https://services.campusfaso.bf" target="_blank" 
+                       class="flex items-center justify-between bg-blue-50 border border-blue-200 p-4 rounded-2xl hover:bg-blue-100 transition group">
+                        <div class="flex items-center gap-3">
+                            <div class="w-10 h-10 rounded-full bg-blue-100 flex items-center justify-center text-blue-600 text-lg">📘</div>
+                            <div>
+                                <span class="font-bold text-gray-800 block">Système LMD</span>
+                                <span class="text-[10px] text-gray-500">Services académiques</span>
+                            </div>
+                        </div>
+                        <i class="fas fa-arrow-right text-blue-500 group-hover:translate-x-1 transition"></i>
+                    </a>
+                    
+                    <!-- Lien 3 : SOTRACO -->
+                    <a href="https://sotraco.bf" target="_blank" 
+                       class="flex items-center justify-between bg-orange-50 border border-orange-200 p-4 rounded-2xl hover:bg-orange-100 transition group">
+                        <div class="flex items-center gap-3">
+                            <div class="w-10 h-10 rounded-full bg-orange-100 flex items-center justify-center text-orange-600 text-lg">🚌</div>
+                            <div>
+                                <span class="font-bold text-gray-800 block">SOTRACO</span>
+                                <span class="text-[10px] text-gray-500">Transport urbain</span>
+                            </div>
+                        </div>
+                        <i class="fas fa-arrow-right text-orange-500 group-hover:translate-x-1 transition"></i>
+                    </a>
+                </div>
+            </div>
+        </section>
+
+        <!-- Notes -->
+        <section id="view-notes" class="view-section">
+            <div class="bg-white p-6 rounded-[35px] card-shadow text-center">
+                <h2 class="text-xl font-black mb-4 text-green-700">Résultats Académiques</h2>
+                <input type="text" id="matSearch" placeholder="Votre INE" class="input-pro text-center mb-4 uppercase">
+                <button onclick="searchNotes()" class="w-full uts-green text-white py-4 rounded-2xl font-bold transition active:scale-95">VÉRIFIER</button>
+                <div id="resultArea" class="mt-4 space-y-2"></div>
+            </div>
+        </section>
+
+        <!-- Communauté & Stories -->
+        <section id="view-community" class="view-section">
+            <div class="flex gap-4 overflow-x-auto no-scrollbar mb-4 bg-white p-4 rounded-[25px] border shadow-sm items-center">
+                <div class="flex-shrink-0 w-16 text-center">
+                    <div class="relative w-14 h-14 mx-auto" onclick="document.getElementById('storyInput').click()">
+                        <div class="w-14 h-14 rounded-full border-2 border-dashed border-green-500 flex items-center justify-center bg-gray-50 cursor-pointer">
+                            <i class="fas fa-plus text-green-500 text-lg"></i>
+                        </div>
+                    </div>
+                    <span class="text-[9px] mt-1 block font-bold">Ajouter statut</span>
+                    <input type="file" id="storyInput" class="hidden" accept="image/*,video/*" onchange="handleStoryFile(event)">
+                </div>
+                <div id="stories-container" class="flex gap-4"></div>
+            </div>
+
+            <div class="bg-white rounded-[30px] overflow-hidden border shadow-sm">
+                <div class="p-4 border-b bg-gray-50">
+                    <div class="relative">
+                        <input type="text" id="searchFriend" placeholder="Rechercher un ami..." class="input-pro pl-10" onkeyup="filterFriendsList()">
+                        <i class="fas fa-search absolute left-4 top-4 text-gray-400"></i>
+                    </div>
+                </div>
+                <div id="friendsList" class="min-h-[400px] divide-y divide-gray-50"></div>
+            </div>
+        </section>
+
+        <!-- Profil -->
+        <section id="view-profile" class="view-section">
+            <div id="register-ui" class="bg-white p-6 rounded-[35px] card-shadow space-y-4 text-center">
+                <div class="relative w-24 h-24 mx-auto mb-2">
+                    <img id="temp-avatar" src="https://cdn-icons-png.flaticon.com/512/149/149071.png" class="w-full h-full rounded-full object-cover">
+                    <label class="absolute bottom-0 right-0 w-8 h-8 uts-green text-white rounded-full flex items-center justify-center cursor-pointer border-2 border-white">
+                        <i class="fas fa-camera text-xs"></i>
+                        <input type="file" class="hidden" onchange="previewImage(event)">
+                    </label>
+                </div>
+                <h3 class="font-bold text-gray-800 text-lg">Votre Profil UTS</h3>
+                <div class="grid grid-cols-2 gap-3">
+                    <input type="text" id="reg-nom" placeholder="Nom" class="input-pro">
+                    <input type="text" id="reg-prenom" placeholder="Prénom" class="input-pro">
+                </div>
+                <input type="text" id="reg-filiere" placeholder="Filière / Niveau" class="input-pro">
+                <button onclick="registerUser()" class="w-full uts-green text-white py-4 rounded-2xl font-bold">ENREGISTRER</button>
+            </div>
+            <div id="profile-ui" class="hidden bg-white p-8 rounded-[40px] card-shadow text-center">
+                <div class="relative w-32 h-32 mx-auto mb-4">
+                    <img id="user-img" src="" class="w-full h-full rounded-full border-4 border-green-500 object-cover">
+                    <label class="absolute bottom-0 right-0 w-10 h-10 uts-green text-white rounded-full flex items-center justify-center cursor-pointer border-2 border-white shadow-lg">
+                        <i class="fas fa-pen text-xs"></i>
+                        <input type="file" class="hidden" onchange="previewImage(event, true)">
+                    </label>
+                </div>
+                <h2 id="user-full-name" class="text-2xl font-black text-gray-800"></h2>
+                <p id="user-sub" class="text-green-600 font-bold text-xs uppercase tracking-wider mt-1"></p>
+                <button onclick="handleLogout()" class="mt-6 text-red-500 font-bold text-xs uppercase">Se déconnecter</button>
+            </div>
+        </section>
+    </main>
+
+    <!-- Chat Window -->
+    <div id="chatWindow" class="hidden fixed inset-0 z-[150] bg-white flex flex-col">
+        <header class="uts-green text-white p-4 flex items-center gap-3 shadow-md">
+            <i class="fas fa-arrow-left cursor-pointer text-xl" onclick="closeChat()"></i>
+            <div class="flex-1">
+                <h3 id="chatPartnerName" class="font-bold text-sm">Ami</h3>
+                <p id="chatStatus" class="text-[10px] opacity-80">En ligne</p>
+            </div>
+        </header>
+        <div id="chatMessages" class="flex-1 overflow-y-auto p-4 space-y-3 bg-gray-50 flex flex-col"></div>
+        
+        <div class="p-3 bg-white border-t flex items-center gap-2">
+            <button onclick="document.getElementById('fileInput').click()" class="bg-gray-200 text-gray-700 w-10 h-10 rounded-full flex items-center justify-center transition active:scale-95">
+                <i class="fas fa-paperclip"></i>
+            </button>
+            <input type="file" id="fileInput" class="hidden" accept="image/*,video/*" onchange="sendFileMessage(event)">
+            
+            <button id="cancelVoiceBtn" onclick="cancelVoiceRecord()" class="hidden bg-red-100 text-red-600 w-10 h-10 rounded-full flex items-center justify-center transition active:scale-95">
+                <i class="fas fa-trash"></i>
+            </button>
+
+            <input type="text" id="chatInput" placeholder="Écrire un message..." class="input-pro flex-1" onkeypress="if(event.key==='Enter') sendMessage()">
+            
+            <button id="voiceBtn" onclick="toggleVoiceRecord()" class="bg-gray-200 text-gray-700 w-10 h-10 rounded-full flex items-center justify-center transition active:scale-95">
+                <i class="fas fa-microphone"></i>
+            </button>
+            
+            <button onclick="sendMessage()" class="uts-green text-white w-10 h-10 rounded-full flex items-center justify-center"><i class="fas fa-paper-plane"></i></button>
+        </div>
+    </div>
+
+    <!-- Navigation -->
+    <nav class="fixed bottom-0 left-0 right-0 bg-white/90 backdrop-blur-md border-t p-2 flex justify-around shadow-2xl z-50">
+        <button onclick="switchView('home')" id="nav-home" class="nav-btn flex flex-col items-center p-2 active-nav"><i class="fas fa-home text-xl"></i><span class="text-[9px] font-bold mt-1">Accueil</span></button>
+        <button onclick="switchView('search')" id="nav-search" class="nav-btn flex flex-col items-center p-2 text-gray-400"><i class="fas fa-link text-xl"></i><span class="text-[9px] font-bold mt-1">Ressources</span></button>
+        <button onclick="switchView('notes')" id="nav-notes" class="nav-btn flex flex-col items-center p-2 text-gray-400"><i class="fas fa-graduation-cap text-xl"></i><span class="text-[9px] font-bold mt-1">Notes</span></button>
+        <button onclick="switchView('community')" id="nav-community" class="nav-btn flex flex-col items-center p-2 text-gray-400"><i class="fas fa-users text-xl"></i><span class="text-[9px] font-bold mt-1">Amis</span></button>
+        <button onclick="switchView('profile')" id="nav-profile" class="nav-btn flex flex-col items-center p-2 text-gray-400"><i class="fas fa-user-circle text-xl"></i><span class="text-[9px] font-bold mt-1">Profil</span></button>
+    </nav>
+
+    <!-- Modals -->
+    <div id="imageModal" class="hidden fixed inset-0 z-[200] bg-black/90 flex items-center justify-center p-4" onclick="closeImageModal()">
+        <img id="modalImage" src="" class="max-w-full max-h-full object-contain rounded-lg">
+    </div>
+    
+    <div id="mediaModal" class="hidden fixed inset-0 z-[210] bg-black/95 flex items-center justify-center p-4" onclick="closeMediaModal()">
+        <div id="mediaContent" class="media-modal-content"></div>
+       
