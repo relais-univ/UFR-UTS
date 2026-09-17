@@ -1041,4 +1041,161 @@
             await db.collection("users").doc(currentUser.uid).set(userData, { merge: true });
         }
         updateProfileUI(userData);
-        showToast("✅ Profil e
+        showToast("✅ Profil enregistré !");
+        switchView('home');
+    }
+
+    async function previewImage(e, instant = false) {
+        const file = e.target.files[0];
+        if (!file) return;
+        try {
+            const compressedFile = await imageCompression(file, { maxSizeMB: 0.1, maxWidthOrHeight: 400, useWebWorker: true });
+            const reader = new FileReader();
+            reader.onload = async (ev) => {
+                const url = ev.target.result;
+                document.getElementById('temp-avatar').src = url;
+                document.getElementById('user-img').src = url;
+                let data = JSON.parse(localStorage.getItem('uts_user_data')) || {};
+                data.avatar = url;
+                localStorage.setItem('uts_user_data', JSON.stringify(data));
+                if (instant && currentUser) {
+                    await db.collection("users").doc(currentUser.uid).set(data, { merge: true });
+                    showToast("📸 Photo mise à jour !");
+                }
+            };
+            reader.readAsDataURL(compressedFile);
+        } catch (error) { }
+    }
+
+    function updateProfileUI(data) {
+        document.getElementById('register-ui').classList.add('hidden');
+        document.getElementById('profile-ui').classList.remove('hidden');
+        document.getElementById('user-full-name').innerText = `${data.prenom || ''} ${data.nom || ''}`;
+        document.getElementById('user-sub').innerText = data.filiere || 'Étudiant';
+        if (data.avatar) document.getElementById('user-img').src = data.avatar;
+    }
+
+    async function searchNotes() {
+        const ine = document.getElementById('matSearch').value.trim().toUpperCase();
+        const res = document.getElementById('resultArea');
+        if (!ine) return showToast("Entrez votre INE");
+        res.innerHTML = '<div class="text-center text-gray-500">🔍 Recherche...</div>';
+        try {
+            const snap = await db.collection("notes").where("ine", "==", ine).get();
+            if (snap.empty) {
+                res.innerHTML = `<div class="bg-blue-50 p-6 rounded-2xl text-center"><p class="font-bold text-blue-700">📭 Aucun résultat : ${ine}</p></div>`;
+                return;
+            }
+            let html = `<div class="space-y-4">`;
+            snap.forEach(doc => {
+                const n = doc.data();
+                html += `<div class="bg-white rounded-2xl border p-4 text-left shadow-sm">
+                            <div class="font-bold text-green-800">📚 ${(n.matiere || "Sans nom").replace(/</g, '&lt;')}</div>
+                            <div class="text-2xl font-black text-green-700">${n.note || "?"}/20</div>
+                            ${n.commentaire ? `<div class="text-sm italic text-gray-500 mt-1">“${n.commentaire.replace(/</g, '&lt;')}”</div>` : ''}
+                        </div>`;
+            });
+            html += `</div>`;
+            res.innerHTML = html;
+        } catch (error) {
+            res.innerHTML = `<div class="text-red-500">❌ Indisponible</div>`;
+        }
+    }
+
+    function updateFriendsList(docs) {
+        const list = document.getElementById('friendsList');
+        if (!list) return;
+        list.innerHTML = "";
+        allFetchedUsers = [];
+        docs.forEach(doc => {
+            const u = doc.data();
+            const fullNom = `${u.prenom || ''} ${u.nom || ''}`.trim();
+            if (!fullNom || EXCLUDED_NAMES.some(ex => fullNom.toLowerCase().includes(ex.toLowerCase()))) return;
+            if (currentUser && doc.id === currentUser.uid) return;
+            allFetchedUsers.push({ id: doc.id, ...u, fullNom });
+        });
+        if (allFetchedUsers.length === 0) {
+            list.innerHTML = `<p class="text-xs text-gray-400 text-center py-8">Aucun étudiant connecté.</p>`;
+            return;
+        }
+        renderFriends(allFetchedUsers);
+    }
+
+    function renderFriends(usersArray) {
+        const list = document.getElementById('friendsList');
+        if (!list) return;
+        list.innerHTML = "";
+        usersArray.forEach(u => {
+            const onlineDot = u.online ? '<span class="absolute bottom-0 right-0 w-3 h-3 bg-green-500 border-2 border-white rounded-full"></span>' : '';
+            list.innerHTML += `
+                <div class="flex items-center gap-4 p-4 hover:bg-gray-50 cursor-pointer transition" onclick="startChat('${u.id}', '${u.fullNom.replace(/'/g, "\\'")}')">
+                    <div class="relative">
+                        <img src="${u.avatar || 'https://cdn-icons-png.flaticon.com/512/149/149071.png'}" class="w-12 h-12 rounded-full object-cover border-2 border-green-500">
+                        ${onlineDot}
+                    </div>
+                    <div class="flex-1">
+                        <h4 class="font-bold text-sm text-gray-800">${u.fullNom}</h4>
+                        <p class="text-[10px] text-gray-500">${u.filiere || 'Étudiant UTS'}</p>
+                    </div>
+                    <i class="fas fa-comment-dots text-green-600 text-lg"></i>
+                </div>`;
+        });
+    }
+
+    function filterFriendsList() {
+        const query = document.getElementById('searchFriend')?.value.toLowerCase().trim() || "";
+        const filtered = allFetchedUsers.filter(u => u.fullNom.toLowerCase().includes(query) || (u.filiere && u.filiere.toLowerCase().includes(query)));
+        renderFriends(filtered);
+    }
+
+    let deferredPrompt = null;
+    window.addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); deferredPrompt = e; });
+    function installApp() {
+        if (deferredPrompt) { deferredPrompt.prompt(); deferredPrompt = null; } 
+        else { showToast("📱 Menu -> Ajouter à l'écran"); }
+    }
+
+    auth.onAuthStateChanged(async (user) => {
+        if (!user) {
+            await auth.signInAnonymously();
+        } else {
+            currentUser = user;
+            const saved = localStorage.getItem('uts_user_data');
+            if (saved) updateProfileUI(JSON.parse(saved));
+            chargerDonneesGlobales();
+            await db.collection("users").doc(user.uid).set({
+                online: true,
+                lastSeen: firebase.firestore.FieldValue.serverTimestamp()
+            }, { merge: true });
+            window.addEventListener('beforeunload', () => {
+                db.collection("users").doc(user.uid).set({
+                    online: false,
+                    lastSeen: firebase.firestore.FieldValue.serverTimestamp()
+                }, { merge: true });
+            });
+            setTimeout(() => utsMeshNettoyage(), 3000);
+            setTimeout(() => initUTSP2P(), 4000);
+        }
+    });
+
+    document.addEventListener('visibilitychange', () => {
+        if (!document.hidden && currentUser) utsMeshNettoyage();
+    });
+
+    window.onload = () => {
+        if (!localStorage.getItem('uts_registered')) switchView('profile');
+        else switchView('home');
+    };
+
+    Object.assign(window, { 
+        switchView, openSidebar, closeSidebar, openImageModal, closeImageModal, 
+        openMediaModal, closeMediaModal, handleLogout, installApp, startChat, 
+        sendMessage, sendFileMessage, closeChat, registerUser, previewImage, 
+        searchNotes, handleStoryFile, showToast, loadMoreArticles,
+        openStoryViewer, nextStory, prevStory, closeStoryViewer, deleteCurrentStory,
+        toggleVoiceRecord, cancelVoiceRecord, deleteMessage, filterFriendsList,
+        showStoryViewers, handleStoryVideo, initUTSP2P
+    });
+    </script>
+</body>
+</html>
