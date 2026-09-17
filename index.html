@@ -639,4 +639,406 @@
         const file = e.target.files[0];
         if (!file || !currentUser) return showToast("Connecte-toi d'abord");
         const isVideo = file.type.startsWith('video/');
-        const isImage = file.type.startsWi
+        const isImage = file.type.startsWith('image/');
+        if (!isVideo && !isImage) return showToast("Images ou vidéos uniquement");
+        if (isImage) { postImageStory(file); } else { handleStoryVideo(file); }
+        e.target.value = '';
+    }
+
+    async function postImageStory(file) {
+        showToast("⏳ Envoi en cours...");
+        try {
+            const userData = JSON.parse(localStorage.getItem('uts_user_data')) || {};
+            const author = `${userData.prenom || ''} ${userData.nom || ''}`.trim() || "Anonyme";
+            const url = await utsMeshUpload(file, 'stories');
+            await db.collection("stories").add({
+                mediaUrl: url, mediaType: 'image', userName: author, userId: currentUser.uid,
+                userAvatar: userData.avatar || 'https://cdn-icons-png.flaticon.com/512/149/149071.png',
+                date: firebase.firestore.FieldValue.serverTimestamp(), views: 0, viewers: []
+            });
+            utsP2PBroadcastStory({
+                mediaUrl: url, mediaType: 'image', userName: author,
+                userId: currentUser.uid, userAvatar: userData.avatar
+            });
+            showToast("✅ Publié");
+        } catch (error) { showToast("❌ Échec de l'envoi"); }
+    }
+
+    async function handleStoryVideo(file) {
+        const fichierFinal = await utsMeshProposerCoupe(file);
+        if (!fichierFinal) return;
+        showToast("⏳ Envoi en cours...");
+        try {
+            const userData = JSON.parse(localStorage.getItem('uts_user_data')) || {};
+            const author = `${userData.prenom || ''} ${userData.nom || ''}`.trim() || "Anonyme";
+            const url = await utsMeshUpload(fichierFinal, 'stories');
+            await db.collection("stories").add({
+                mediaUrl: url, mediaType: 'video', userName: author, userId: currentUser.uid,
+                userAvatar: userData.avatar || 'https://cdn-icons-png.flaticon.com/512/149/149071.png',
+                date: firebase.firestore.FieldValue.serverTimestamp(), views: 0, viewers: []
+            });
+            utsP2PBroadcastStory({
+                mediaUrl: url, mediaType: 'video', userName: author,
+                userId: currentUser.uid, userAvatar: userData.avatar
+            });
+            showToast("✅ Publié");
+        } catch (error) { showToast("❌ Échec de l'envoi"); }
+    }
+
+    function formatDateRelative(firebaseDate) {
+        if (!firebaseDate) return "À l'instant";
+        const dateJS = firebaseDate.toDate ? firebaseDate.toDate() : new Date(firebaseDate);
+        const diff = Math.floor((new Date() - dateJS) / 60000);
+        if (diff < 1) return "À l'instant";
+        if (diff < 60) return `${diff} min`;
+        if (diff < 1440) return `${Math.floor(diff / 60)}h`;
+        return "Hier";
+    }
+
+    function chargerDonneesGlobales() {
+        const now = new Date();
+        db.collection("stories").orderBy("date", "desc").onSnapshot(snap => {
+            const container = document.getElementById('stories-container');
+            if (!container) return;
+            container.innerHTML = "";
+            groupedStories = {};
+            snap.forEach(d => {
+                const s = d.data();
+                s.id = d.id;
+                const storyDate = s.date ? s.date.toDate() : new Date();
+                if ((now - storyDate) > 86400000) { d.ref.delete(); return; }
+                if (!groupedStories[s.userId]) {
+                    groupedStories[s.userId] = {
+                        userName: s.userName || "Anonyme",
+                        userAvatar: s.userAvatar || "https://cdn-icons-png.flaticon.com/512/149/149071.png",
+                        stories: []
+                    };
+                }
+                groupedStories[s.userId].stories.push(s);
+            });
+            currentStoryUserIds = Object.keys(groupedStories);
+            currentStoryUserIds.forEach(uId => {
+                const uGroup = groupedStories[uId];
+                const lastStory = uGroup.stories[0];
+                const tempsRelatif = formatDateRelative(lastStory.date);
+                const displayName = (currentUser && uId === currentUser.uid) ? "Vous" : uGroup.userName;
+                container.innerHTML += `
+                    <div class="flex-shrink-0 w-16 text-center cursor-pointer hover:scale-105 transition" onclick="openStoryViewer('${uId}')">
+                        <div class="w-14 h-14 rounded-full border-2 border-green-500 p-0.5 mx-auto relative overflow-hidden">
+                            <img src="${uGroup.userAvatar}" class="w-full h-full object-cover rounded-full">
+                        </div>
+                        <span class="text-[9px] mt-1 block truncate font-medium">${displayName}</span>
+                        <span class="text-[7px] text-gray-400 block -mt-1">${tempsRelatif}</span>
+                    </div>`;
+            });
+        });
+        db.collection("users").orderBy("date", "desc").onSnapshot(snap => updateFriendsList(snap.docs));
+    }
+
+    async function showStoryViewers(viewerIds) {
+        if (!viewerIds || viewerIds.length === 0) return showToast("👁️ Aucune vue");
+        const names = [];
+        for (const uid of viewerIds) {
+            try {
+                const doc = await db.collection("users").doc(uid).get();
+                if (doc.exists) {
+                    const u = doc.data();
+                    names.push(`${u.prenom || ''} ${u.nom || ''}`);
+                }
+            } catch (e) {}
+        }
+        if (names.length === 0) return showToast("👁️ Aucune vue");
+        alert("👁️ Vu par (" + names.length + ") :\n\n" + names.join("\n"));
+    }
+
+    function openStoryViewer(userId) {
+        currentUserIndex = currentStoryUserIds.indexOf(userId);
+        if (currentUserIndex === -1) return;
+        currentStoryIndex = 0;
+        document.getElementById('storyViewer').classList.remove('hidden');
+        renderStory();
+    }
+
+    function renderStory() {
+        clearTimeout(storyTimer);
+        const currentUserId = currentStoryUserIds[currentUserIndex];
+        const uGroup = groupedStories[currentUserId];
+        const story = uGroup.stories[currentStoryIndex];
+        const displayName = (currentUser && currentUserId === currentUser.uid) ? "Vous" : uGroup.userName;
+        document.getElementById('storyUserName').innerText = displayName;
+        document.getElementById('storyUserAvatar').src = uGroup.userAvatar;
+        document.getElementById('storyTime').innerText = formatDateRelative(story.date);
+        const isOwner = currentUser && story.userId === currentUser.uid;
+        const viewsEl = document.getElementById('storyViews');
+        viewsEl.innerText = `${story.views || 0} vues ${isOwner ? '👁️' : ''}`;
+        viewsEl.style.cursor = isOwner ? 'pointer' : 'default';
+        if (isOwner) viewsEl.onclick = () => showStoryViewers(story.viewers || []);
+        else viewsEl.onclick = null;
+        const viewerId = currentUser ? currentUser.uid : 'anonymous';
+        if (!story.viewers || !story.viewers.includes(viewerId)) {
+            const newViewers = [...(story.viewers || []), viewerId];
+            db.collection("stories").doc(story.id).update({ views: newViewers.length, viewers: newViewers });
+        }
+        const deleteBtn = document.getElementById('deleteStoryBtn');
+        if (currentUser && story.userId === currentUser.uid) deleteBtn.classList.remove('hidden');
+        else deleteBtn.classList.add('hidden');
+        const progressContainer = document.getElementById('storyProgressContainer');
+        progressContainer.innerHTML = '';
+        uGroup.stories.forEach((_, idx) => {
+            const bar = document.createElement('div');
+            bar.className = 'story-progress-bar';
+            const fill = document.createElement('div');
+            fill.className = 'story-progress-fill';
+            if (idx < currentStoryIndex) fill.style.width = '100%';
+            if (idx === currentStoryIndex) fill.id = 'currentProgressFill';
+            bar.appendChild(fill);
+            progressContainer.appendChild(bar);
+        });
+        const wrapper = document.getElementById('storyMediaWrapper');
+        wrapper.innerHTML = '';
+        if (story.mediaType === 'video') {
+            wrapper.innerHTML = `<video id="activeStoryVideo" src="${story.mediaUrl}" autoplay playsinline class="max-w-full max-h-[75vh] object-contain rounded-xl"></video>`;
+            const video = document.getElementById('activeStoryVideo');
+            video.onended = () => nextStory();
+        } else {
+            wrapper.innerHTML = `<img src="${story.mediaUrl}" class="max-w-full max-h-[75vh] object-contain rounded-xl">`;
+            let fill = document.getElementById('currentProgressFill');
+            let width = 0;
+            storyTimer = setInterval(() => {
+                width += 2;
+                if (fill) fill.style.width = width + '%';
+                if (width >= 100) { clearInterval(storyTimer); nextStory(); }
+            }, 100);
+        }
+    }
+
+    function nextStory() {
+        clearTimeout(storyTimer);
+        const currentUserId = currentStoryUserIds[currentUserIndex];
+        const uGroup = groupedStories[currentUserId];
+        if (currentStoryIndex < uGroup.stories.length - 1) {
+            currentStoryIndex++;
+            renderStory();
+        } else if (currentUserIndex < currentStoryUserIds.length - 1) {
+            currentUserIndex++;
+            currentStoryIndex = 0;
+            renderStory();
+        } else {
+            closeStoryViewer();
+        }
+    }
+
+    function prevStory() {
+        clearTimeout(storyTimer);
+        if (currentStoryIndex > 0) {
+            currentStoryIndex--;
+            renderStory();
+        } else if (currentUserIndex > 0) {
+            currentUserIndex--;
+            const previousUserId = currentStoryUserIds[currentUserIndex];
+            currentStoryIndex = groupedStories[previousUserId].stories.length - 1;
+            renderStory();
+        }
+    }
+
+    function closeStoryViewer() {
+        clearTimeout(storyTimer);
+        document.getElementById('storyViewer').classList.add('hidden');
+    }
+
+    async function deleteCurrentStory() {
+        const currentUserId = currentStoryUserIds[currentUserIndex];
+        const story = groupedStories[currentUserId].stories[currentStoryIndex];
+        if (confirm("Voulez-vous vraiment supprimer ce statut ?")) {
+            await db.collection("stories").doc(story.id).delete();
+            showToast("🗑️ Statut supprimé !");
+            closeStoryViewer();
+        }
+    }
+
+    function startChat(amiId, amiNom) {
+        activeChatId = amiId;
+        document.getElementById('chatPartnerName').innerText = amiNom;
+        document.getElementById('chatWindow').classList.remove('hidden');
+        const roomId = [currentUser.uid, amiId].sort().join('_');
+        utsP2PSyncMessages(roomId);
+        db.collection("messages").where("roomId", "==", roomId).where("senderId", "==", amiId).where("read", "==", false).get().then(snap => {
+            snap.forEach(doc => doc.ref.update({ read: true }));
+        });
+        if (unsubscribeStatus) unsubscribeStatus();
+        unsubscribeStatus = db.collection("users").doc(amiId).onSnapshot(doc => {
+            if (doc.exists) {
+                const u = doc.data();
+                const statusEl = document.getElementById('chatStatus');
+                if (u.online) { statusEl.innerText = "En ligne"; }
+                else if (u.lastSeen) {
+                    const lastSeen = u.lastSeen.toDate();
+                    const diff = Math.floor((new Date() - lastSeen) / 60000);
+                    statusEl.innerText = diff < 1 ? "Vu à l'instant" : diff < 60 ? `Vu il y a ${diff} min` : diff < 1440 ? `Vu il y a ${Math.floor(diff/60)}h` : "Hors ligne";
+                } else { statusEl.innerText = "Hors ligne"; }
+            }
+        });
+        if (unsubscribeChat) unsubscribeChat();
+        unsubscribeChat = db.collection("messages").where("roomId", "==", roomId).orderBy("date", "asc").onSnapshot(snap => {
+            const box = document.getElementById('chatMessages');
+            if (!box) return;
+            box.innerHTML = "";
+            snap.forEach(doc => {
+                const m = doc.data();
+                if (m.senderId === amiId && !m.read) doc.ref.update({ read: true });
+            });
+            snap.forEach(doc => {
+                const m = doc.data();
+                const docId = doc.id;
+                const isMe = m.senderId === currentUser.uid;
+                const msgElement = document.createElement('div');
+                msgElement.className = `max-w-[80%] chat-message ${isMe ? 'self-end bg-green-600 text-white rounded-l-2xl rounded-tr-2xl' : 'self-start bg-white border rounded-r-2xl rounded-tl-2xl shadow-sm'} p-3 text-sm flex flex-col`;
+                if (isMe) { msgElement.onclick = () => deleteMessage(docId); msgElement.title = "Cliquer pour supprimer"; }
+                if (m.type === 'audio' || m.audioUrl) {
+                    msgElement.innerHTML = `<audio controls src="${m.audioUrl}" class="max-w-[200px]"></audio>`;
+                } else if (m.type === 'file' && m.fileUrl) {
+                    if (m.fileType && m.fileType.startsWith('image/')) {
+                        msgElement.innerHTML = `<img src="${m.fileUrl}" class="max-w-[200px] rounded-lg cursor-pointer" onclick="openImageModal('${m.fileUrl}')">`;
+                    } else {
+                        msgElement.innerHTML = `<video src="${m.fileUrl}" controls class="max-w-[200px] rounded-lg"></video>`;
+                    }
+                } else { msgElement.textContent = m.text || ''; }
+                if (isMe) {
+                    const checkIcon = m.read ? '✓✓' : '✓';
+                    const checkColor = m.read ? 'text-blue-300' : 'text-green-200';
+                    msgElement.innerHTML += `<span class="text-[10px] ${checkColor} text-right mt-1 font-bold">${checkIcon}</span>`;
+                }
+                box.appendChild(msgElement);
+            });
+            box.scrollTo({ top: box.scrollHeight, behavior: 'smooth' });
+        });
+    }
+
+    async function sendMessage() {
+        const input = document.getElementById('chatInput');
+        const text = input.value.trim();
+        if (!text || !activeChatId || !currentUser) return;
+        const roomId = [currentUser.uid, activeChatId].sort().join('_');
+        input.value = "";
+        await db.collection("messages").add({ 
+            roomId, senderId: currentUser.uid, 
+            text: text.replace(/</g, '&lt;').replace(/>/g, '&gt;'), 
+            type: 'text', read: false,
+            date: firebase.firestore.FieldValue.serverTimestamp() 
+        });
+        utsP2PBroadcastMessage(roomId, {
+            senderId: currentUser.uid,
+            text: text,
+            type: 'text',
+            date: Date.now()
+        });
+    }
+
+    async function sendFileMessage(e) {
+        const file = e.target.files[0];
+        if (!file || !activeChatId || !currentUser) return;
+        const isVideo = file.type.startsWith('video/');
+        const isImage = file.type.startsWith('image/');
+        if (!isImage && !isVideo) return showToast("Images ou vidéos uniquement");
+        let fichierFinal = file;
+        if (isVideo) {
+            fichierFinal = await utsMeshProposerCoupe(file);
+            if (!fichierFinal) { e.target.value = ''; return; }
+        }
+        showToast("⏳ Envoi en cours...");
+        try {
+            const url = await utsMeshUpload(fichierFinal, 'chat');
+            const roomId = [currentUser.uid, activeChatId].sort().join('_');
+            await db.collection("messages").add({
+                roomId, senderId: currentUser.uid, fileUrl: url,
+                fileType: file.type, type: 'file', read: false,
+                date: firebase.firestore.FieldValue.serverTimestamp()
+            });
+        } catch (error) { showToast("❌ Échec de l'envoi"); }
+        e.target.value = '';
+    }
+
+    async function deleteMessage(messageId) {
+        if (confirm("Supprimer ce message pour tout le monde ?")) {
+            try {
+                await db.collection("messages").doc(messageId).delete();
+                showToast("🗑️ Message supprimé !");
+            } catch (e) { showToast("❌ Échec"); }
+        }
+    }
+
+    function closeChat() {
+        document.getElementById('chatWindow').classList.add('hidden');
+        if (unsubscribeChat) unsubscribeChat();
+        if (unsubscribeStatus) unsubscribeStatus();
+    }
+
+    async function toggleVoiceRecord() {
+        const btn = document.getElementById('voiceBtn');
+        const cancelBtn = document.getElementById('cancelVoiceBtn');
+        if (!isRecording) {
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                mediaRecorder = new MediaRecorder(stream);
+                audioChunks = [];
+                isVoiceCancelled = false;
+                mediaRecorder.ondataavailable = e => audioChunks.push(e.data);
+                mediaRecorder.onstop = async () => {
+                    if (isVoiceCancelled) return;
+                    const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
+                    const file = new File([audioBlob], 'voice.webm', { type: 'audio/webm' });
+                    showToast("⏳ Envoi en cours...");
+                    try {
+                        const url = await utsMeshUpload(file, 'voice');
+                        const roomId = [currentUser.uid, activeChatId].sort().join('_');
+                        await db.collection("messages").add({ 
+                            roomId, senderId: currentUser.uid, audioUrl: url, 
+                            type: 'audio', read: false,
+                            date: firebase.firestore.FieldValue.serverTimestamp() 
+                        });
+                    } catch (e) { showToast("❌ Échec"); }
+                };
+                mediaRecorder.start();
+                isRecording = true;
+                btn.classList.add('bg-red-600', 'text-white', 'recording-pulse');
+                btn.classList.remove('bg-gray-200', 'text-gray-700');
+                cancelBtn.classList.remove('hidden');
+                showToast("🎙️ Enregistrement...");
+            } catch (err) { showToast("❌ Micro refusé"); }
+        } else {
+            mediaRecorder.stop();
+            isRecording = false;
+            btn.classList.remove('bg-red-600', 'text-white', 'recording-pulse');
+            btn.classList.add('bg-gray-200', 'text-gray-700');
+            cancelBtn.classList.add('hidden');
+        }
+    }
+
+    function cancelVoiceRecord() {
+        if (isRecording && mediaRecorder) {
+            isVoiceCancelled = true;
+            mediaRecorder.stop();
+            isRecording = false;
+            const btn = document.getElementById('voiceBtn');
+            const cancelBtn = document.getElementById('cancelVoiceBtn');
+            btn.classList.remove('bg-red-600', 'text-white', 'recording-pulse');
+            btn.classList.add('bg-gray-200', 'text-gray-700');
+            cancelBtn.classList.add('hidden');
+            showToast("🗑️ Vocal annulé");
+        }
+    }
+
+    async function registerUser() {
+        const nom = document.getElementById('reg-nom').value.trim();
+        const prenom = document.getElementById('reg-prenom').value.trim();
+        const filiere = document.getElementById('reg-filiere').value.trim();
+        if (!nom || !prenom) return showToast("⚠️ Nom et Prénom requis");
+        const savedData = JSON.parse(localStorage.getItem('uts_user_data')) || {};
+        const userData = { nom, prenom, filiere, avatar: savedData.avatar || "", date: firebase.firestore.FieldValue.serverTimestamp() };
+        localStorage.setItem('uts_user_data', JSON.stringify(userData));
+        localStorage.setItem('uts_registered', 'true');
+        if (currentUser) {
+            await db.collection("users").doc(currentUser.uid).set(userData, { merge: true });
+        }
+        updateProfileUI(userData);
+        showToast("✅ Profil e
