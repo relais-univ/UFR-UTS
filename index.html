@@ -263,4 +263,346 @@
         appId: "1:520201058732:web:d2beaf37f46f7cd6daa209"
     };
 
-    if (!firebase.apps.length) firebase.initializeAp
+    if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
+    const db = firebase.firestore();
+    const auth = firebase.auth();
+
+    let currentUser = null;
+    let lastArticleDoc = null;
+    let isLoadingMore = false;
+    let allArticlesLoaded = false;
+    let allFetchedUsers = [];
+    let modeModification = false;
+    const EXCLUDED_NAMES = ["Étudiant UTS", "Anonyme", "Test"];
+
+    // ========== TOAST ==========
+    function showToast(m) {
+        const t = document.getElementById('uts-toast');
+        const msg = document.getElementById('toast-message');
+        if (t && msg) { msg.innerText = m; t.classList.add('show'); setTimeout(() => t.classList.remove('show'), 3000); }
+    }
+
+    // ========== NAVIGATION ==========
+    function switchView(v) {
+        const titles = { 'home': "Fil d'actualité", 'search': "Ressources UTS", 'notes': "Mes notes", 'community': "Mes Amis", 'profile': "Mon Profil" };
+        const pageTitle = document.getElementById('pageTitle');
+        if (pageTitle && titles[v]) pageTitle.innerText = titles[v];
+
+        document.querySelectorAll('.view-section').forEach(s => s.classList.remove('active'));
+        const target = document.getElementById('view-' + v);
+        if (target) target.classList.add('active');
+
+        document.querySelectorAll('.nav-btn').forEach(btn => {
+            btn.classList.remove('active-nav');
+            btn.classList.add('text-gray-400');
+        });
+        const activeBtn = document.getElementById('nav-' + v);
+        if (activeBtn) { activeBtn.classList.add('active-nav'); activeBtn.classList.remove('text-gray-400'); }
+
+        if (v === 'home') loadInitialFeed();
+    }
+
+    function openSidebar() { document.getElementById('sidebar')?.classList.add('open'); document.getElementById('sidebarOverlay')?.classList.add('open'); }
+    function closeSidebar() { document.getElementById('sidebar')?.classList.remove('open'); document.getElementById('sidebarOverlay')?.classList.remove('open'); }
+    function openImageModal(src) { document.getElementById('modalImage').src = src; document.getElementById('imageModal').classList.remove('hidden'); }
+    function closeImageModal() { document.getElementById('imageModal').classList.add('hidden'); }
+
+    function handleLogout() {
+        if (confirm("Voulez-vous vraiment vous déconnecter ?")) {
+            auth.signOut().then(() => { localStorage.clear(); location.reload(); }).catch(() => { localStorage.clear(); location.reload(); });
+        }
+    }
+
+    // ========== ARTICLES ==========
+    async function loadMoreArticles() {
+        if (isLoadingMore || allArticlesLoaded) return;
+        isLoadingMore = true;
+
+        let q = db.collection("articles").orderBy("createdAt", "desc").limit(5);
+        if (lastArticleDoc) q = db.collection("articles").orderBy("createdAt", "desc").startAfter(lastArticleDoc).limit(5);
+
+        try {
+            const snap = await q.get();
+            if (snap.empty) { allArticlesLoaded = true; document.getElementById('load-more-container')?.classList.add('hidden'); isLoadingMore = false; return; }
+
+            lastArticleDoc = snap.docs[snap.docs.length - 1];
+            const feed = document.getElementById('news-feed');
+
+            snap.forEach(doc => {
+                const art = doc.data();
+                const titre = art.title || art.titre || "";
+                const contenu = art.content || art.contenu || art.texte || "";
+                const image = art.imageUrl || art.image || null;
+                const imgHtml = image ? `<img src="${image}" class="w-full h-auto max-h-64 object-cover rounded-xl mb-3 mt-1" onerror="this.style.display='none'">` : '';
+
+                feed.innerHTML += `
+                    <div class="bg-white rounded-3xl overflow-hidden shadow-sm border border-gray-100 mb-4">
+                        <div class="p-5">
+                            ${titre ? `<h3 class="font-black text-lg text-gray-800 mb-1">${titre.replace(/</g, '&lt;')}</h3>` : ''}
+                            ${imgHtml}
+                            <p class="text-sm text-gray-600 leading-relaxed">${contenu.replace(/\n/g, '<br>').replace(/</g, '&lt;')}</p>
+                        </div>
+                    </div>`;
+            });
+
+            if (snap.docs.length < 5) allArticlesLoaded = true;
+            document.getElementById('load-more-container')?.classList.toggle('hidden', allArticlesLoaded);
+        } catch (e) { }
+        isLoadingMore = false;
+    }
+
+    function loadInitialFeed() {
+        lastArticleDoc = null; allArticlesLoaded = false;
+        document.getElementById('news-feed').innerHTML = '';
+        loadMoreArticles();
+    }
+
+    // ========== PROFIL ==========
+    async function registerUser() {
+        const nom = document.getElementById('reg-nom').value.trim();
+        const prenom = document.getElementById('reg-prenom').value.trim();
+        const filiere = document.getElementById('reg-filiere').value.trim();
+        const tel = document.getElementById('reg-tel').value.trim().replace(/\s/g, '');
+        const snap = document.getElementById('reg-snap').value.trim().replace('@', '');
+        const insta = document.getElementById('reg-insta').value.trim().replace('@', '');
+
+        // ═══ VÉRIFICATIONS OBLIGATOIRES ═══
+        if (!nom) return showToast("⚠️ Nom obligatoire");
+        if (!prenom) return showToast("⚠️ Prénom obligatoire");
+        if (!filiere) return showToast("⚠️ Filière obligatoire");
+        if (!tel) return showToast("⚠️ Numéro WhatsApp obligatoire");
+        if (tel.replace(/\D/g, '').length < 8) return showToast("⚠️ Numéro WhatsApp invalide");
+
+        const savedData = JSON.parse(localStorage.getItem('uts_user_data')) || {};
+        const userData = {
+            nom, prenom, filiere,
+            telephone: tel,
+            snapchat: snap || "",
+            instagram: insta || "",
+            avatar: savedData.avatar || "",
+            date: savedData.date || firebase.firestore.FieldValue.serverTimestamp()
+        };
+
+        localStorage.setItem('uts_user_data', JSON.stringify(userData));
+        localStorage.setItem('uts_registered', 'true');
+
+        if (currentUser) {
+            await db.collection("users").doc(currentUser.uid).set(userData, { merge: true });
+        }
+        updateProfileUI(userData);
+        showToast(modeModification ? "✅ Profil mis à jour !" : "✅ Profil enregistré !");
+
+        modeModification = false;
+        document.getElementById('btnAnnulerModif').classList.add('hidden');
+        document.getElementById('btnEnregistrer').innerText = "ENREGISTRER";
+        document.getElementById('form-title').innerText = "Votre Profil UTS";
+
+        switchView('home');
+    }
+
+    function ouvrirModification() {
+        const data = JSON.parse(localStorage.getItem('uts_user_data')) || {};
+        modeModification = true;
+
+        document.getElementById('register-ui').classList.remove('hidden');
+        document.getElementById('profile-ui').classList.add('hidden');
+
+        document.getElementById('reg-nom').value = data.nom || '';
+        document.getElementById('reg-prenom').value = data.prenom || '';
+        document.getElementById('reg-filiere').value = data.filiere || '';
+        document.getElementById('reg-tel').value = data.telephone || '';
+        document.getElementById('reg-snap').value = data.snapchat || '';
+        document.getElementById('reg-insta').value = data.instagram || '';
+        document.getElementById('temp-avatar').src = data.avatar || 'https://cdn-icons-png.flaticon.com/512/149/149071.png';
+
+        document.getElementById('btnEnregistrer').innerText = "METTRE À JOUR";
+        document.getElementById('btnAnnulerModif').classList.remove('hidden');
+        document.getElementById('form-title').innerText = "Modifier mon profil";
+
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+
+    function annulerModification() {
+        modeModification = false;
+        document.getElementById('register-ui').classList.add('hidden');
+        document.getElementById('profile-ui').classList.remove('hidden');
+        document.getElementById('btnEnregistrer').innerText = "ENREGISTRER";
+        document.getElementById('btnAnnulerModif').classList.add('hidden');
+        document.getElementById('form-title').innerText = "Votre Profil UTS";
+    }
+
+    async function previewImage(e, instant = false) {
+        const file = e.target.files[0];
+        if (!file) return;
+        try {
+            const compressedFile = await imageCompression(file, { maxSizeMB: 0.1, maxWidthOrHeight: 400, useWebWorker: true });
+            const reader = new FileReader();
+            reader.onload = async (ev) => {
+                const url = ev.target.result;
+                document.getElementById('temp-avatar').src = url;
+                document.getElementById('user-img').src = url;
+
+                let data = JSON.parse(localStorage.getItem('uts_user_data')) || {};
+                data.avatar = url;
+                localStorage.setItem('uts_user_data', JSON.stringify(data));
+                if (instant && currentUser) {
+                    await db.collection("users").doc(currentUser.uid).set(data, { merge: true });
+                    showToast("📸 Photo mise à jour !");
+                }
+            };
+            reader.readAsDataURL(compressedFile);
+        } catch (error) { }
+    }
+
+    function updateProfileUI(data) {
+        document.getElementById('register-ui').classList.add('hidden');
+        document.getElementById('profile-ui').classList.remove('hidden');
+        document.getElementById('user-full-name').innerText = `${data.prenom || ''} ${data.nom || ''}`;
+        document.getElementById('user-sub').innerText = data.filiere || 'Étudiant';
+        if (data.avatar) document.getElementById('user-img').src = data.avatar;
+
+        // Boutons contacts dans le profil
+        const contactsDiv = document.getElementById('profile-contacts');
+        let html = '';
+        if (data.telephone) html += `<a href="https://wa.me/${data.telephone.replace(/\D/g,'')}" target="_blank" class="flex items-center gap-2 bg-green-500 text-white px-4 py-2 rounded-full font-bold text-xs"><i class="fab fa-whatsapp"></i> WhatsApp</a>`;
+        if (data.snapchat) html += `<a href="https://snapchat.com/add/${data.snapchat}" target="_blank" class="flex items-center gap-2 bg-yellow-400 text-white px-4 py-2 rounded-full font-bold text-xs"><i class="fab fa-snapchat"></i> Snapchat</a>`;
+        if (data.instagram) html += `<a href="https://instagram.com/${data.instagram}" target="_blank" class="flex items-center gap-2 bg-gradient-to-r from-pink-500 to-purple-500 text-white px-4 py-2 rounded-full font-bold text-xs"><i class="fab fa-instagram"></i> Instagram</a>`;
+        contactsDiv.innerHTML = html;
+    }
+
+    // ========== NOTES ==========
+    async function searchNotes() {
+        const ine = document.getElementById('matSearch').value.trim().toUpperCase();
+        const res = document.getElementById('resultArea');
+        if (!ine) return showToast("Entrez votre INE");
+        res.innerHTML = '<div class="text-center text-gray-500">🔍 Recherche...</div>';
+        try {
+            const snap = await db.collection("notes").where("ine", "==", ine).get();
+            if (snap.empty) {
+                res.innerHTML = `<div class="bg-blue-50 p-6 rounded-2xl text-center"><p class="font-bold text-blue-700">📭 Aucun résultat pour l'INE : ${ine}</p></div>`;
+                return;
+            }
+            let html = `<div class="space-y-4">`;
+            snap.forEach(doc => {
+                const n = doc.data();
+                html += `<div class="bg-white rounded-2xl border p-4 text-left shadow-sm">
+                            <div class="font-bold text-green-800">📚 ${(n.matiere || "Sans nom").replace(/</g, '&lt;')}</div>
+                            <div class="text-2xl font-black text-green-700">${n.note || "?"}/20</div>
+                            ${n.commentaire ? `<div class="text-sm italic text-gray-500 mt-1">"${n.commentaire.replace(/</g, '&lt;')}"</div>` : ''}
+                        </div>`;
+            });
+            html += `</div>`;
+            res.innerHTML = html;
+        } catch (error) {
+            res.innerHTML = `<div class="text-red-500">❌ Consultation indisponible actuellement</div>`;
+        }
+    }
+
+    // ========== AMIS ==========
+    function updateFriendsList(docs) {
+        const list = document.getElementById('friendsList');
+        if (!list) return;
+        list.innerHTML = "";
+        allFetchedUsers = [];
+
+        docs.forEach(doc => {
+            const u = doc.data();
+            const fullNom = `${u.prenom || ''} ${u.nom || ''}`.trim();
+            if (!fullNom || EXCLUDED_NAMES.some(ex => fullNom.toLowerCase().includes(ex.toLowerCase()))) return;
+            if (currentUser && doc.id === currentUser.uid) return;
+
+            allFetchedUsers.push({ id: doc.id, ...u, fullNom });
+        });
+
+        if (allFetchedUsers.length === 0) {
+            list.innerHTML = `<p class="text-xs text-gray-400 text-center py-8">Aucun étudiant connecté pour le moment.</p>`;
+            return;
+        }
+
+        renderFriends(allFetchedUsers);
+    }
+
+    function renderFriends(usersArray) {
+        const list = document.getElementById('friendsList');
+        if (!list) return;
+        list.innerHTML = "";
+
+        usersArray.forEach(u => {
+            let boutons = '';
+
+            if (u.telephone) {
+                boutons += `<a href="https://wa.me/${u.telephone.replace(/\D/g,'')}" target="_blank" onclick="event.stopPropagation()" class="flex items-center justify-center gap-1 bg-green-500 hover:bg-green-600 text-white px-3 py-1.5 rounded-full font-bold text-[10px] transition">
+                    <i class="fab fa-whatsapp text-sm"></i> WhatsApp
+                </a>`;
+            }
+            if (u.snapchat) {
+                boutons += `<a href="https://snapchat.com/add/${u.snapchat}" target="_blank" onclick="event.stopPropagation()" class="flex items-center justify-center gap-1 bg-yellow-400 hover:bg-yellow-500 text-white px-3 py-1.5 rounded-full font-bold text-[10px] transition">
+                    <i class="fab fa-snapchat text-sm"></i> Snapchat
+                </a>`;
+            }
+            if (u.instagram) {
+                boutons += `<a href="https://instagram.com/${u.instagram}" target="_blank" onclick="event.stopPropagation()" class="flex items-center justify-center gap-1 bg-gradient-to-r from-pink-500 to-purple-500 hover:from-pink-600 hover:to-purple-600 text-white px-3 py-1.5 rounded-full font-bold text-[10px] transition">
+                    <i class="fab fa-instagram text-sm"></i> Instagram
+                </a>`;
+            }
+
+            const boutonsHtml = boutons
+                ? `<div class="flex flex-wrap gap-2 mt-2">${boutons}</div>`
+                : `<p class="text-[10px] text-gray-400 mt-2 italic">Aucun contact renseigné</p>`;
+
+            list.innerHTML += `
+                <div class="p-4 hover:bg-gray-50 transition">
+                    <div class="flex items-center gap-4">
+                        <img src="${u.avatar || 'https://cdn-icons-png.flaticon.com/512/149/149071.png'}" class="w-14 h-14 rounded-full object-cover border-2 border-green-500">
+                        <div class="flex-1 min-w-0">
+                            <h4 class="font-bold text-sm text-gray-800">${u.fullNom}</h4>
+                        </div>
+                    </div>
+                    ${boutonsHtml}
+                </div>`;
+        });
+    }
+
+    function filterFriendsList() {
+        const query = document.getElementById('searchFriend')?.value.toLowerCase().trim() || "";
+        const filtered = allFetchedUsers.filter(u => u.fullNom.toLowerCase().includes(query));
+        renderFriends(filtered);
+    }
+
+    // ========== PWA ==========
+    let deferredPrompt = null;
+    window.addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); deferredPrompt = e; });
+    function installApp() {
+        if (deferredPrompt) { deferredPrompt.prompt(); deferredPrompt = null; }
+        else { showToast("📱 Menu -> Ajouter à l'écran d'accueil"); }
+    }
+
+    // ========== AUTH ==========
+    auth.onAuthStateChanged(async (user) => {
+        if (!user) {
+            await auth.signInAnonymously();
+        } else {
+            currentUser = user;
+            const saved = localStorage.getItem('uts_user_data');
+            if (saved) updateProfileUI(JSON.parse(saved));
+
+            // Charger les utilisateurs
+            db.collection("users").orderBy("date", "desc").onSnapshot(snap => updateFriendsList(snap.docs));
+        }
+    });
+
+    window.onload = () => {
+        if (!localStorage.getItem('uts_registered')) switchView('profile');
+        else switchView('home');
+    };
+
+    // ========== EXPORT ==========
+    Object.assign(window, {
+        switchView, openSidebar, closeSidebar, openImageModal, closeImageModal,
+        handleLogout, installApp, registerUser, previewImage,
+        searchNotes, showToast, loadMoreArticles, filterFriendsList,
+        ouvrirModification, annulerModification
+    });
+    </script>
+</body>
+</html>
