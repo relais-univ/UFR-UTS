@@ -611,4 +611,423 @@ async function downloadYouTube(v) {
 function downloadArchive(v) {
     window.open(v.source.replace('/details/', '/download/'), '_blank');
     showToast("✅ Téléchargement lancé !");
-    s
+    saveToOffline(v, v.source.replace('/details/', '/download/'));
+}
+
+function saveToHistory(v) {
+    try {
+        let hist = JSON.parse(localStorage.getItem('uts_history') || '[]');
+        hist = hist.filter(h => h.id !== v.id);
+        hist.unshift({ id: v.id, title: v.title, thumb: v.thumb, type: v.type, videoId: v.videoId, ts: Date.now() });
+        hist = hist.slice(0, 50);
+        localStorage.setItem('uts_history', JSON.stringify(hist));
+    } catch (e) {}
+}
+
+function saveToOffline(v, url) {
+    try {
+        let off = JSON.parse(localStorage.getItem('uts_offline') || '[]');
+        off = off.filter(o => o.id !== v.id);
+        off.unshift({ id: v.id, title: v.title, thumb: v.thumb, type: v.type, videoId: v.videoId, url: url, ts: Date.now() });
+        off = off.slice(0, 100);
+        localStorage.setItem('uts_offline', JSON.stringify(off));
+    } catch (e) {}
+}
+
+function renderOfflineList() {
+    const el = document.getElementById('offlineList');
+    if (!el) return;
+    const off = JSON.parse(localStorage.getItem('uts_offline') || '[]');
+    if (off.length === 0) {
+        el.innerHTML = `<p class="text-xs text-gray-400 text-center py-6">Aucun téléchargement pour l'instant.<br>Appuyez sur ⬇️ dans une vidéo pour la garder.</p>`;
+        return;
+    }
+    el.innerHTML = off.map(o => `
+        <div class="flex items-center gap-3 bg-white p-3 rounded-2xl border border-gray-100">
+            <img src="${o.thumb}" class="w-16 h-12 object-cover rounded-lg">
+            <div class="flex-1 min-w-0">
+                <h4 class="font-bold text-[11px] text-gray-800 line-clamp-2 leading-tight">${(o.title||'').replace(/</g,'&lt;')}</h4>
+                <p class="text-[9px] text-gray-400 mt-0.5">${new Date(o.ts).toLocaleDateString('fr-FR')}</p>
+            </div>
+            <button onclick="playOffline('${o.id}')" class="uts-green text-white w-8 h-8 rounded-full flex items-center justify-center text-xs"><i class="fas fa-play"></i></button>
+            <button onclick="removeOffline('${o.id}')" class="text-red-400 w-8 h-8 flex items-center justify-center text-xs"><i class="fas fa-trash"></i></button>
+        </div>
+    `).join('');
+}
+
+function playOffline(id) {
+    const off = JSON.parse(localStorage.getItem('uts_offline') || '[]');
+    const o = off.find(x => x.id === id);
+    if (!o) return;
+    if (o.type === 'youtube' && o.videoId) {
+        window.open(`https://www.youtube.com/watch?v=${o.videoId}`, '_blank');
+    } else if (o.url) {
+        window.open(o.url, '_blank');
+    } else {
+        showToast("⚠️ Lien indisponible");
+    }
+}
+
+function removeOffline(id) {
+    let off = JSON.parse(localStorage.getItem('uts_offline') || '[]');
+    off = off.filter(o => o.id !== id);
+    localStorage.setItem('uts_offline', JSON.stringify(off));
+    renderOfflineList();
+}
+
+function showOffline() {
+    document.getElementById('boxCategories').classList.add('hidden');
+    document.getElementById('boxGrid').classList.add('hidden');
+    document.getElementById('boxLoader').classList.add('hidden');
+    document.getElementById('boxMoreBtn').classList.add('hidden');
+    document.getElementById('boxEmpty').classList.add('hidden');
+    document.getElementById('offlinePanel').classList.remove('hidden');
+    renderOfflineList();
+}
+
+function hideOffline() {
+    document.getElementById('offlinePanel').classList.add('hidden');
+    document.getElementById('boxCategories').classList.remove('hidden');
+    document.getElementById('boxGrid').classList.remove('hidden');
+}
+
+// ========== UTS LIVE - CHAÎNES BURKINABÈ AUTOMATIQUES ==========
+const CHAINES_BF = [
+    { nom: 'RTB',        q: 'RTB Burkina Faso journal',   logo: '🇧🇫' },
+    { nom: 'BF1',        q: 'BF1 Burkina Info journal',   logo: '📺' },
+    { nom: '3TV',        q: '3TV Burkina Faso',           logo: '🎥' },
+    { nom: 'Savan TV',   q: 'Savan TV Burkina',           logo: '🏔️' },
+    { nom: 'Burkina24',  q: 'Burkina24 journal',          logo: '📰' },
+    { nom: 'Sidwaya',    q: 'Sidwaya Burkina',            logo: '📖' },
+    { nom: 'Faso7',      q: 'Faso7 Burkina actualité',    logo: '⚡' },
+    { nom: 'Oméga FM',   q: 'Oméga FM Burkina',           logo: '📻' }
+];
+
+let stories = [];
+let seenStories = JSON.parse(localStorage.getItem('uts_seen_stories') || '[]');
+let marqueeTimer = null;
+let marqueePaused = false;
+const storyClickCounter = {};
+
+async function loadStories() {
+    const bar = document.getElementById('storiesBar');
+    if (!bar) return;
+    bar.innerHTML = `<div class="flex gap-3">
+        ${CHAINES_BF.slice(0,6).map(() => `<div class="w-[72px] shrink-0"><div class="w-[64px] h-[64px] rounded-full bg-gray-200 mx-auto animate-pulse"></div><div class="h-2 bg-gray-200 rounded mt-2 w-full"></div></div>`).join('')}
+    </div>`;
+
+    stories = [];
+    const promises = CHAINES_BF.map(async (ch) => {
+        try {
+            const vids = await searchChainVideos(ch.q, 3);
+            if (vids.length > 0) return { chaine: ch.nom, logo: ch.logo, videos: vids };
+        } catch (e) {}
+        return null;
+    });
+    const results = await Promise.all(promises);
+    stories = results.filter(r => r && r.videos.length > 0);
+
+    if (stories.length === 0) {
+        bar.innerHTML = `<p class="text-[10px] text-gray-400 italic py-4 px-2">Aucune chaîne disponible pour le moment</p>`;
+        return;
+    }
+    renderStoriesBar();
+}
+
+async function searchChainVideos(query, limit = 3) {
+    for (const inst of PIPED_INSTANCES) {
+        try {
+            const url = `${inst}/search?q=${encodeURIComponent(query)}&filter=videos`;
+            const controller = new AbortController();
+            const timeout = setTimeout(() => controller.abort(), 6000);
+            const res = await fetch(url, { signal: controller.signal });
+            clearTimeout(timeout);
+            if (!res.ok) continue;
+            const data = await res.json();
+            const items = (data?.items || []).filter(i => i.type === 'stream' && i.url);
+            if (items.length === 0) continue;
+            return items.slice(0, limit).map(v => {
+                const vid = (v.url || '').split('v=')[1]?.split('&')[0] || '';
+                return {
+                    videoId: vid,
+                    title: v.title || '',
+                    thumb: v.thumbnail || `https://i.ytimg.com/vi/${vid}/mqdefault.jpg`,
+                    duration: v.duration || 0,
+                    uploader: v.uploaderName || '',
+                    uploaded: v.uploadedDate || ''
+                };
+            }).filter(v => v.videoId);
+        } catch (e) { continue; }
+    }
+    return [];
+}
+
+function renderStoriesBar() {
+    const bar = document.getElementById('storiesBar');
+    if (!bar) return;
+    const html = stories.map((s, i) => {
+        const key = s.chaine + '_' + s.videos[0].videoId;
+        const isSeen = seenStories.includes(key);
+        const first = s.videos[0];
+        const avatar = `https://i.ytimg.com/vi/${first.videoId}/mqdefault.jpg`;
+        return `
+        <div onclick="openStory(${i})" class="flex flex-col items-center cursor-pointer shrink-0 w-[72px] story-card">
+            <div class="relative">
+                <div class="story-ring ${isSeen ? 'seen' : ''}">
+                    <div class="story-inner">
+                        <img src="${avatar}" class="story-avatar" onerror="this.src='https://via.placeholder.com/60/008751/ffffff?text=UTS'">
+                    </div>
+                </div>
+                <div class="absolute -bottom-1 left-1/2 -translate-x-1/2 bg-white rounded-full text-[10px] px-1.5 shadow">${s.logo || ''}</div>
+            </div>
+            <div class="text-[9px] font-bold text-gray-700 mt-2 text-center line-clamp-2 leading-tight w-full">${s.chaine}</div>
+        </div>`;
+    }).join('');
+    bar.innerHTML = html + html;
+    startMarquee();
+    setupMarqueeInteractions();
+}
+
+function startMarquee() {
+    const bar = document.getElementById('storiesBar');
+    if (!bar) return;
+    if (marqueeTimer) clearInterval(marqueeTimer);
+    marqueeTimer = setInterval(() => {
+        if (marqueePaused) return;
+        bar.scrollLeft += 0.8;
+        if (bar.scrollLeft >= bar.scrollWidth / 2) {
+            bar.scrollLeft -= bar.scrollWidth / 2;
+        }
+    }, 30);
+}
+
+function setupMarqueeInteractions() {
+    const bar = document.getElementById('storiesBar');
+    if (!bar || bar.dataset.listeners) return;
+    bar.dataset.listeners = '1';
+    ['touchstart', 'mousedown'].forEach(ev =>
+        bar.addEventListener(ev, () => { marqueePaused = true; }, { passive: true })
+    );
+    ['touchend', 'mouseup', 'mouseleave'].forEach(ev =>
+        bar.addEventListener(ev, () => {
+            setTimeout(() => { marqueePaused = false; }, 2500);
+        })
+    );
+}
+
+function openStory(i) {
+    if (i < 0 || i >= stories.length) return;
+    marqueePaused = true;
+    const s = stories[i % stories.length];
+    if (!s.videos || s.videos.length === 0) return;
+    const idx = (storyClickCounter[s.chaine] || 0) % s.videos.length;
+    storyClickCounter[s.chaine] = idx + 1;
+    const v = s.videos[idx];
+    const key = s.chaine + '_' + v.videoId;
+    if (!seenStories.includes(key)) {
+        seenStories.push(key);
+        localStorage.setItem('uts_seen_stories', JSON.stringify(seenStories));
+    }
+    const video = {
+        id: 'story_' + v.videoId,
+        title: s.chaine + ' — ' + (v.title || ''),
+        author: v.uploader || '',
+        thumb: v.thumb,
+        type: 'youtube',
+        videoId: v.videoId,
+        duration: v.duration || 0
+    };
+    document.getElementById('videoTitle').innerText = video.title;
+    const container = document.getElementById('videoContainer');
+    const dlBtn = document.getElementById('videoDownloadBtn');
+    container.innerHTML = `<iframe src="https://www.youtube.com/embed/${video.videoId}?autoplay=1&rel=0" class="w-full h-full max-w-4xl aspect-video rounded-lg" frameborder="0" allow="autoplay; encrypted-media; fullscreen" allowfullscreen></iframe>`;
+    dlBtn.classList.remove('hidden');
+    dlBtn.classList.add('flex');
+    dlBtn.onclick = () => downloadYouTube(video);
+    saveToHistory(video);
+    document.getElementById('videoModal').classList.remove('hidden');
+}
+
+// ========== NOTIFICATIONS ==========
+let notifications = [];
+
+async function loadNotifications() {
+    try {
+        const snap = await db.collection("notifications").orderBy("date", "desc").limit(30).get();
+        notifications = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+        renderNotifBadge();
+        renderNotifList();
+    } catch (e) {}
+}
+
+function renderNotifBadge() {
+    const seen = JSON.parse(localStorage.getItem('uts_seen_notifs') || '[]');
+    const unread = notifications.filter(n => !seen.includes(n.id)).length;
+    const badge = document.getElementById('notifBadge');
+    if (!badge) return;
+    if (unread > 0) {
+        badge.innerText = unread > 9 ? '9+' : unread;
+        badge.classList.remove('hidden');
+    } else {
+        badge.classList.add('hidden');
+    }
+}
+
+function renderNotifList() {
+    const list = document.getElementById('notifList');
+    if (!list) return;
+    if (notifications.length === 0) {
+        list.innerHTML = `<p class="text-xs text-gray-400 text-center py-8">Aucune notification pour l'instant.</p>`;
+        return;
+    }
+    const seen = JSON.parse(localStorage.getItem('uts_seen_notifs') || '[]');
+    list.innerHTML = notifications.map(n => {
+        const isNew = !seen.includes(n.id);
+        const colors = { urgent: 'red', event: 'yellow', info: 'green' };
+        const c = colors[n.type] || 'green';
+        const icons = { urgent: 'exclamation-triangle', event: 'calendar-day', info: 'info-circle' };
+        const ic = icons[n.type] || 'info-circle';
+        const date = n.date?.toDate ? n.date.toDate() : (n.date ? new Date(n.date) : new Date());
+        const dateStr = date.toLocaleDateString('fr-FR', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+        const html = `
+            <div class="flex gap-3 p-3 rounded-2xl border ${isNew ? 'bg-' + c + '-50 border-' + c + '-200' : 'bg-white border-gray-100'}">
+                <div class="w-9 h-9 rounded-full bg-${c}-100 text-${c}-600 flex items-center justify-center shrink-0">
+                    <i class="fas fa-${ic} text-sm"></i>
+                </div>
+                <div class="flex-1 min-w-0">
+                    <h4 class="font-bold text-xs text-gray-800 leading-tight">${(n.titre||'').replace(/</g,'&lt;')}</h4>
+                    <p class="text-[11px] text-gray-600 mt-0.5 leading-snug">${(n.message||'').replace(/</g,'&lt;')}</p>
+                    <p class="text-[9px] text-gray-400 mt-1">${dateStr}</p>
+                </div>
+            </div>`;
+        if (n.lien) return `<a href="${n.lien}" target="_blank" class="block">${html}</a>`;
+        return html;
+    }).join('');
+}
+
+function openNotifPanel() {
+    document.getElementById('notifOverlay').classList.remove('hidden');
+    document.getElementById('notifPanel').classList.remove('translate-x-full');
+    loadNotifications();
+}
+
+function closeNotifPanel() {
+    document.getElementById('notifOverlay').classList.add('hidden');
+    document.getElementById('notifPanel').classList.add('translate-x-full');
+    const seen = JSON.parse(localStorage.getItem('uts_seen_notifs') || '[]');
+    notifications.forEach(n => { if (!seen.includes(n.id)) seen.push(n.id); });
+    localStorage.setItem('uts_seen_notifs', JSON.stringify(seen.slice(-100)));
+    renderNotifBadge();
+    renderNotifList();
+}
+
+function markAllRead() {
+    const seen = JSON.parse(localStorage.getItem('uts_seen_notifs') || '[]');
+    notifications.forEach(n => { if (!seen.includes(n.id)) seen.push(n.id); });
+    localStorage.setItem('uts_seen_notifs', JSON.stringify(seen.slice(-100)));
+    renderNotifBadge();
+    renderNotifList();
+    showToast("✅ Tout marqué comme lu");
+}
+
+// ========== PROFIL ==========
+async function registerUser() {
+    const nom = document.getElementById('reg-nom').value.trim();
+    const prenom = document.getElementById('reg-prenom').value.trim();
+    const filiere = document.getElementById('reg-filiere').value.trim();
+    const tel = document.getElementById('reg-tel').value.trim().replace(/\s/g, '');
+    const snap = document.getElementById('reg-snap').value.trim().replace('@', '');
+    const insta = document.getElementById('reg-insta').value.trim().replace('@', '');
+    if (!nom) return showToast("⚠️ Nom obligatoire");
+    if (!prenom) return showToast("⚠️ Prénom obligatoire");
+    if (!filiere) return showToast("⚠️ Filière obligatoire");
+    if (!tel) return showToast("⚠️ Numéro WhatsApp obligatoire");
+    if (tel.replace(/\D/g, '').length < 8) return showToast("⚠️ Numéro WhatsApp invalide");
+
+    const savedData = JSON.parse(localStorage.getItem('uts_user_data')) || {};
+    const userData = {
+        nom, prenom, filiere, telephone: tel,
+        snapchat: snap || "", instagram: insta || "",
+        avatar: savedData.avatar || "",
+        date: savedData.date || firebase.firestore.FieldValue.serverTimestamp()
+    };
+    localStorage.setItem('uts_user_data', JSON.stringify(userData));
+    localStorage.setItem('uts_registered', 'true');
+    if (currentUser) await db.collection("users").doc(currentUser.uid).set(userData, { merge: true });
+    updateProfileUI(userData);
+    showToast(modeModification ? "✅ Profil mis à jour !" : "✅ Profil enregistré !");
+    modeModification = false;
+    document.getElementById('btnAnnulerModif').classList.add('hidden');
+    document.getElementById('btnEnregistrer').innerText = "ENREGISTRER";
+    document.getElementById('form-title').innerText = "Votre Profil UTS";
+    switchView('home');
+}
+function ouvrirModification() {
+    const data = JSON.parse(localStorage.getItem('uts_user_data')) || {};
+    modeModification = true;
+    document.getElementById('register-ui').classList.remove('hidden');
+    document.getElementById('profile-ui').classList.add('hidden');
+    document.getElementById('reg-nom').value = data.nom || '';
+    document.getElementById('reg-prenom').value = data.prenom || '';
+    document.getElementById('reg-filiere').value = data.filiere || '';
+    document.getElementById('reg-tel').value = data.telephone || '';
+    document.getElementById('reg-snap').value = data.snapchat || '';
+    document.getElementById('reg-insta').value = data.instagram || '';
+    document.getElementById('temp-avatar').src = data.avatar || 'https://cdn-icons-png.flaticon.com/512/149/149071.png';
+    document.getElementById('btnEnregistrer').innerText = "METTRE À JOUR";
+    document.getElementById('btnAnnulerModif').classList.remove('hidden');
+    document.getElementById('form-title').innerText = "Modifier mon profil";
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+function annulerModification() {
+    modeModification = false;
+    document.getElementById('register-ui').classList.add('hidden');
+    document.getElementById('profile-ui').classList.remove('hidden');
+    document.getElementById('btnEnregistrer').innerText = "ENREGISTRER";
+    document.getElementById('btnAnnulerModif').classList.add('hidden');
+    document.getElementById('form-title').innerText = "Votre Profil UTS";
+}
+async function previewImage(e, instant = false) {
+    const file = e.target.files[0];
+    if (!file) return;
+    try {
+        const compressedFile = await imageCompression(file, { maxSizeMB: 0.1, maxWidthOrHeight: 400, useWebWorker: true });
+        const reader = new FileReader();
+        reader.onload = async (ev) => {
+            const url = ev.target.result;
+            document.getElementById('temp-avatar').src = url;
+            document.getElementById('user-img').src = url;
+            let data = JSON.parse(localStorage.getItem('uts_user_data')) || {};
+            data.avatar = url;
+            localStorage.setItem('uts_user_data', JSON.stringify(data));
+            if (instant && currentUser) {
+                await db.collection("users").doc(currentUser.uid).set(data, { merge: true });
+                showToast("📸 Photo mise à jour !");
+            }
+        };
+        reader.readAsDataURL(compressedFile);
+    } catch (error) { }
+}
+function updateProfileUI(data) {
+    document.getElementById('register-ui').classList.add('hidden');
+    document.getElementById('profile-ui').classList.remove('hidden');
+    document.getElementById('user-full-name').innerText = `${data.prenom || ''} ${data.nom || ''}`;
+    document.getElementById('user-sub').innerText = data.filiere || 'Étudiant';
+    if (data.avatar) document.getElementById('user-img').src = data.avatar;
+    const contactsDiv = document.getElementById('profile-contacts');
+    let html = '';
+    if (data.telephone) html += `<a href="https://wa.me/${data.telephone.replace(/\D/g,'')}" target="_blank" class="flex items-center gap-2 bg-green-500 text-white px-4 py-2 rounded-full font-bold text-xs"><i class="fab fa-whatsapp"></i> WhatsApp</a>`;
+    if (data.snapchat) html += `<a href="https://snapchat.com/add/${data.snapchat}" target="_blank" class="flex items-center gap-2 bg-yellow-400 text-white px-4 py-2 rounded-full font-bold text-xs"><i class="fab fa-snapchat"></i> Snapchat</a>`;
+    if (data.instagram) html += `<a href="https://instagram.com/${data.instagram}" target="_blank" class="flex items-center gap-2 bg-gradient-to-r from-pink-500 to-purple-500 text-white px-4 py-2 rounded-full font-bold text-xs"><i class="fab fa-instagram"></i> Instagram</a>`;
+    contactsDiv.innerHTML = html;
+}
+
+// ========== NOTES ==========
+async function searchNotes() {
+    const ine = document.getElementById('matSearch').value.trim().toUpperCase();
+    const res = document.getElementById('resultArea');
+    if (!ine) return showToast("Entrez votre INE");
+    res.innerHTML = '<div class="text-center text-gray-500">🔍 Recherche...</div>';
+    try {
+        const snap = await db.collection("notes").where("ine", "==", ine).get();
+        if (snap.empty) { res.innerHTML = `<div class="bg-blue-50 p-6 rounded-2xl text-center"><p class="font-bold text-
