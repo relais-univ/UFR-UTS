@@ -1,0 +1,349 @@
+<nav class="fixed bottom-0 left-0 right-0 bg-white/90 backdrop-blur-md border-t p-1 flex justify-around shadow-2xl z-50">
+    <button onclick="switchView('home')" id="nav-home" class="nav-btn flex flex-col items-center p-1.5 active-nav"><i class="fas fa-home text-lg"></i><span class="text-[8px] font-bold mt-0.5">Accueil</span></button>
+    <button onclick="switchView('search')" id="nav-search" class="nav-btn flex flex-col items-center p-1.5 text-gray-400"><i class="fas fa-link text-lg"></i><span class="text-[8px] font-bold mt-0.5">Ressources</span></button>
+    <button onclick="switchView('box')" id="nav-box" class="nav-btn flex flex-col items-center p-1.5 text-gray-400"><i class="fas fa-film text-lg"></i><span class="text-[8px] font-bold mt-0.5">Box</span></button>
+    <button onclick="switchView('notes')" id="nav-notes" class="nav-btn flex flex-col items-center p-1.5 text-gray-400"><i class="fas fa-graduation-cap text-lg"></i><span class="text-[8px] font-bold mt-0.5">Notes</span></button>
+    <button onclick="switchView('community')" id="nav-community" class="nav-btn flex flex-col items-center p-1.5 text-gray-400"><i class="fas fa-users text-lg"></i><span class="text-[8px] font-bold mt-0.5">Amis</span></button>
+    <button onclick="switchView('profile')" id="nav-profile" class="nav-btn flex flex-col items-center p-1.5 text-gray-400"><i class="fas fa-user-circle text-lg"></i><span class="text-[8px] font-bold mt-0.5">Profil</span></button>
+</nav>
+
+<div id="imageModal" class="hidden fixed inset-0 z-[200] bg-black/90 flex items-center justify-center p-4" onclick="closeImageModal()">
+    <img id="modalImage" src="" class="max-w-full max-h-full object-contain rounded-lg">
+</div>
+
+<div id="videoModal" class="hidden fixed inset-0 z-[300] bg-black/95 flex flex-col">
+    <div class="flex justify-between items-center p-4 text-white">
+        <h3 id="videoTitle" class="font-bold text-sm truncate flex-1 mr-3"></h3>
+        <button onclick="closeVideoModal()" class="text-white text-2xl"><i class="fas fa-times"></i></button>
+    </div>
+    <div id="videoContainer" class="flex-1 flex items-center justify-center p-2"></div>
+    <div class="p-4 flex justify-center gap-3">
+        <a id="videoDownloadBtn" href="#" target="_blank" class="hidden items-center gap-2 bg-green-600 text-white px-5 py-2 rounded-full font-bold text-xs"><i class="fas fa-download"></i> Télécharger</a>
+        <a id="videoSourceBtn" href="#" target="_blank" class="flex items-center gap-2 bg-white/10 text-white px-5 py-2 rounded-full font-bold text-xs"><i class="fas fa-external-link-alt"></i> Source</a>
+    </div>
+</div>
+
+<script>
+// ========== FIREBASE ==========
+const firebaseConfig = {
+    apiKey: "AIzaSyDXmjqF1DvqF0k8-YCUY-MHjyxRf6CBU78",
+    authDomain: "uts-e6211.firebaseapp.com",
+    projectId: "uts-e6211",
+    storageBucket: "uts-e6211.firebasestorage.app",
+    messagingSenderId: "520201058732",
+    appId: "1:520201058732:web:d2beaf37f46f7cd6daa209"
+};
+if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
+const db = firebase.firestore();
+const auth = firebase.auth();
+
+let currentUser = null;
+let lastArticleDoc = null;
+let isLoadingMore = false;
+let allArticlesLoaded = false;
+let allFetchedUsers = [];
+let modeModification = false;
+const EXCLUDED_NAMES = ["Étudiant UTS", "Anonyme", "Test"];
+
+// ========== TOAST ==========
+function showToast(m) {
+    const t = document.getElementById('uts-toast');
+    const msg = document.getElementById('toast-message');
+    if (t && msg) { msg.innerText = m; t.classList.add('show'); setTimeout(() => t.classList.remove('show'), 3000); }
+}
+
+// ========== NAVIGATION ==========
+function switchView(v) {
+    const titles = { 'home': "Fil d'actualité", 'search': "Ressources UTS", 'box': "UTS Box", 'notes': "Mes notes", 'community': "Mes Amis", 'profile': "Mon Profil" };
+    const pageTitle = document.getElementById('pageTitle');
+    if (pageTitle && titles[v]) pageTitle.innerText = titles[v];
+    document.querySelectorAll('.view-section').forEach(s => s.classList.remove('active'));
+    const target = document.getElementById('view-' + v);
+    if (target) target.classList.add('active');
+    document.querySelectorAll('.nav-btn').forEach(btn => { btn.classList.remove('active-nav'); btn.classList.add('text-gray-400'); });
+    const activeBtn = document.getElementById('nav-' + v);
+    if (activeBtn) { activeBtn.classList.add('active-nav'); activeBtn.classList.remove('text-gray-400'); }
+    if (v === 'home') loadInitialFeed();
+    if (v === 'box' && boxVideos.length === 0) loadBox(true);
+}
+function openSidebar() { document.getElementById('sidebar')?.classList.add('open'); document.getElementById('sidebarOverlay')?.classList.add('open'); }
+function closeSidebar() { document.getElementById('sidebar')?.classList.remove('open'); document.getElementById('sidebarOverlay')?.classList.remove('open'); }
+function openImageModal(src) { document.getElementById('modalImage').src = src; document.getElementById('imageModal').classList.remove('hidden'); }
+function closeImageModal() { document.getElementById('imageModal').classList.add('hidden'); }
+function handleLogout() {
+    if (confirm("Voulez-vous vraiment vous déconnecter ?")) {
+        auth.signOut().then(() => { localStorage.clear(); location.reload(); }).catch(() => { localStorage.clear(); location.reload(); });
+    }
+}
+
+// ========== ARTICLES ==========
+async function loadMoreArticles() {
+    if (isLoadingMore || allArticlesLoaded) return;
+    isLoadingMore = true;
+    let q = db.collection("articles").orderBy("createdAt", "desc").limit(5);
+    if (lastArticleDoc) q = db.collection("articles").orderBy("createdAt", "desc").startAfter(lastArticleDoc).limit(5);
+    try {
+        const snap = await q.get();
+        if (snap.empty) { allArticlesLoaded = true; document.getElementById('load-more-container')?.classList.add('hidden'); isLoadingMore = false; return; }
+        lastArticleDoc = snap.docs[snap.docs.length - 1];
+        const feed = document.getElementById('news-feed');
+        snap.forEach(doc => {
+            const art = doc.data();
+            const titre = art.title || art.titre || "";
+            const contenu = art.content || art.contenu || art.texte || "";
+            const image = art.imageUrl || art.image || null;
+            const imgHtml = image ? `<img src="${image}" class="w-full h-auto max-h-64 object-cover rounded-xl mb-3 mt-1" onerror="this.style.display='none'">` : '';
+            feed.innerHTML += `<div class="bg-white rounded-3xl overflow-hidden shadow-sm border border-gray-100 mb-4"><div class="p-5">${titre ? `<h3 class="font-black text-lg text-gray-800 mb-1">${titre.replace(/</g, '&lt;')}</h3>` : ''}${imgHtml}<p class="text-sm text-gray-600 leading-relaxed">${contenu.replace(/\n/g, '<br>').replace(/</g, '&lt;')}</p></div></div>`;
+        });
+        if (snap.docs.length < 5) allArticlesLoaded = true;
+        document.getElementById('load-more-container')?.classList.toggle('hidden', allArticlesLoaded);
+    } catch (e) { }
+    isLoadingMore = false;
+}
+function loadInitialFeed() {
+    lastArticleDoc = null; allArticlesLoaded = false;
+    document.getElementById('news-feed').innerHTML = '';
+    loadMoreArticles();
+}
+
+// ========== UTS BOX - INTERNET ARCHIVE ==========
+let boxVideos = [];
+let boxCategory = 'films';
+let boxQuery = '';
+let boxPage = 1;
+let boxLoading = false;
+let boxHasMore = true;
+
+const BOX_QUERIES = {
+    films:      'collection:feature_films AND mediatype:movies',
+    docs:       '(subject:documentary OR subject:documentaries) AND mediatype:movies',
+    animation:  'collection:animationandcartoons AND mediatype:movies',
+    classiques: 'collection:classic_cartoons AND mediatype:movies',
+    afrique:    '(africa OR african OR burkina OR senegal OR mali) AND mediatype:movies',
+    series:     '(subject:television OR subject:tv-series) AND mediatype:movies'
+};
+
+async function loadBox(reset = false) {
+    if (boxLoading) return;
+    if (reset) { boxVideos = []; boxPage = 1; boxHasMore = true; }
+    if (!boxHasMore) return;
+    boxLoading = true;
+
+    const grid = document.getElementById('boxGrid');
+    const loader = document.getElementById('boxLoader');
+    const empty = document.getElementById('boxEmpty');
+    const moreBtn = document.getElementById('boxMoreBtn');
+    if (reset) { grid.innerHTML = ''; }
+    loader.classList.remove('hidden');
+    empty.classList.add('hidden');
+    moreBtn.classList.add('hidden');
+
+    let query = boxQuery ? `(${boxQuery}) AND mediatype:movies` : BOX_QUERIES[boxCategory];
+    const url = `https://archive.org/advancedsearch.php?q=${encodeURIComponent(query)}&fl[]=identifier&fl[]=title&fl[]=description&fl[]=year&fl[]=creator&fl[]=downloads&sort[]=downloads+desc&rows=20&page=${boxPage}&output=json`;
+
+    try {
+        const res = await fetch(url);
+        const data = await res.json();
+        const docs = data?.response?.docs || [];
+
+        if (docs.length === 0) {
+            boxHasMore = false;
+            if (boxVideos.length === 0) empty.classList.remove('hidden');
+            loader.classList.add('hidden');
+            boxLoading = false;
+            return;
+        }
+
+        const newVideos = docs.map(d => ({
+            id: d.identifier,
+            title: (Array.isArray(d.title) ? d.title[0] : d.title) || 'Sans titre',
+            description: (Array.isArray(d.description) ? d.description[0] : d.description) || '',
+            year: d.year || '',
+            creator: (Array.isArray(d.creator) ? d.creator[0] : d.creator) || '',
+            thumbnail: `https://archive.org/services/img/${d.identifier}`,
+            embedUrl: `https://archive.org/embed/${d.identifier}`,
+            downloadUrl: `https://archive.org/download/${d.identifier}`,
+            sourceUrl: `https://archive.org/details/${d.identifier}`
+        }));
+
+        boxVideos = boxVideos.concat(newVideos);
+        renderBox();
+        boxHasMore = docs.length === 20;
+        if (boxHasMore) moreBtn.classList.remove('hidden');
+    } catch (e) {
+        if (boxVideos.length === 0) empty.classList.remove('hidden');
+    }
+    loader.classList.add('hidden');
+    boxLoading = false;
+}
+
+function renderBox() {
+    const grid = document.getElementById('boxGrid');
+    grid.innerHTML = boxVideos.map(v => `
+        <div onclick="openVideo('${v.id}')" class="bg-white rounded-2xl overflow-hidden shadow-sm border border-gray-100 cursor-pointer active:scale-95 transition">
+            <div class="relative bg-gray-900 aspect-[3/4]">
+                <img src="${v.thumbnail}" class="w-full h-full object-cover" loading="lazy" onerror="this.src='https://via.placeholder.com/300x400/008751/ffffff?text=UTS+Box'">
+                <div class="absolute inset-0 flex items-center justify-center bg-black/20">
+                    <i class="fas fa-play-circle text-white text-4xl drop-shadow-lg"></i>
+                </div>
+                ${v.year ? `<span class="absolute top-2 left-2 bg-black/70 text-white text-[9px] px-2 py-0.5 rounded-full font-bold">${v.year}</span>` : ''}
+            </div>
+            <div class="p-2.5">
+                <h4 class="font-bold text-[11px] text-gray-800 line-clamp-2 leading-tight">${v.title.replace(/</g,'&lt;')}</h4>
+                ${v.creator ? `<p class="text-[9px] text-gray-500 mt-1 truncate">${v.creator.replace(/</g,'&lt;')}</p>` : ''}
+            </div>
+        </div>
+    `).join('');
+}
+
+function setBoxCategory(cat) {
+    boxCategory = cat;
+    boxQuery = '';
+    document.getElementById('boxSearch').value = '';
+    document.querySelectorAll('.box-cat-btn').forEach(b => b.classList.toggle('active-cat', b.dataset.cat === cat));
+    loadBox(true);
+}
+function doBoxSearch() {
+    const q = document.getElementById('boxSearch').value.trim();
+    boxQuery = q;
+    if (!q) { loadBox(true); return; }
+    document.querySelectorAll('.box-cat-btn').forEach(b => b.classList.remove('active-cat'));
+    loadBox(true);
+}
+function loadMoreBox() { boxPage++; loadBox(false); }
+
+function openVideo(id) {
+    const v = boxVideos.find(x => x.id === id);
+    if (!v) return;
+    document.getElementById('videoTitle').innerText = v.title;
+    const container = document.getElementById('videoContainer');
+    container.innerHTML = `<iframe src="${v.embedUrl}" class="w-full h-full max-w-4xl aspect-video rounded-lg" frameborder="0" allowfullscreen></iframe>`;
+    document.getElementById('videoDownloadBtn').href = v.downloadUrl;
+    document.getElementById('videoSourceBtn').href = v.sourceUrl;
+    document.getElementById('videoModal').classList.remove('hidden');
+}
+function closeVideoModal() {
+    document.getElementById('videoModal').classList.add('hidden');
+    document.getElementById('videoContainer').innerHTML = '';
+}
+
+// ========== PROFIL ==========
+async function registerUser() {
+    const nom = document.getElementById('reg-nom').value.trim();
+    const prenom = document.getElementById('reg-prenom').value.trim();
+    const filiere = document.getElementById('reg-filiere').value.trim();
+    const tel = document.getElementById('reg-tel').value.trim().replace(/\s/g, '');
+    const snap = document.getElementById('reg-snap').value.trim().replace('@', '');
+    const insta = document.getElementById('reg-insta').value.trim().replace('@', '');
+    if (!nom) return showToast("⚠️ Nom obligatoire");
+    if (!prenom) return showToast("⚠️ Prénom obligatoire");
+    if (!filiere) return showToast("⚠️ Filière obligatoire");
+    if (!tel) return showToast("⚠️ Numéro WhatsApp obligatoire");
+    if (tel.replace(/\D/g, '').length < 8) return showToast("⚠️ Numéro WhatsApp invalide");
+
+    const savedData = JSON.parse(localStorage.getItem('uts_user_data')) || {};
+    const userData = {
+        nom, prenom, filiere, telephone: tel,
+        snapchat: snap || "", instagram: insta || "",
+        avatar: savedData.avatar || "",
+        date: savedData.date || firebase.firestore.FieldValue.serverTimestamp()
+    };
+    localStorage.setItem('uts_user_data', JSON.stringify(userData));
+    localStorage.setItem('uts_registered', 'true');
+    if (currentUser) await db.collection("users").doc(currentUser.uid).set(userData, { merge: true });
+    updateProfileUI(userData);
+    showToast(modeModification ? "✅ Profil mis à jour !" : "✅ Profil enregistré !");
+    modeModification = false;
+    document.getElementById('btnAnnulerModif').classList.add('hidden');
+    document.getElementById('btnEnregistrer').innerText = "ENREGISTRER";
+    document.getElementById('form-title').innerText = "Votre Profil UTS";
+    switchView('home');
+}
+function ouvrirModification() {
+    const data = JSON.parse(localStorage.getItem('uts_user_data')) || {};
+    modeModification = true;
+    document.getElementById('register-ui').classList.remove('hidden');
+    document.getElementById('profile-ui').classList.add('hidden');
+    document.getElementById('reg-nom').value = data.nom || '';
+    document.getElementById('reg-prenom').value = data.prenom || '';
+    document.getElementById('reg-filiere').value = data.filiere || '';
+    document.getElementById('reg-tel').value = data.telephone || '';
+    document.getElementById('reg-snap').value = data.snapchat || '';
+    document.getElementById('reg-insta').value = data.instagram || '';
+    document.getElementById('temp-avatar').src = data.avatar || 'https://cdn-icons-png.flaticon.com/512/149/149071.png';
+    document.getElementById('btnEnregistrer').innerText = "METTRE À JOUR";
+    document.getElementById('btnAnnulerModif').classList.remove('hidden');
+    document.getElementById('form-title').innerText = "Modifier mon profil";
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+function annulerModification() {
+    modeModification = false;
+    document.getElementById('register-ui').classList.add('hidden');
+    document.getElementById('profile-ui').classList.remove('hidden');
+    document.getElementById('btnEnregistrer').innerText = "ENREGISTRER";
+    document.getElementById('btnAnnulerModif').classList.add('hidden');
+    document.getElementById('form-title').innerText = "Votre Profil UTS";
+}
+async function previewImage(e, instant = false) {
+    const file = e.target.files[0];
+    if (!file) return;
+    try {
+        const compressedFile = await imageCompression(file, { maxSizeMB: 0.1, maxWidthOrHeight: 400, useWebWorker: true });
+        const reader = new FileReader();
+        reader.onload = async (ev) => {
+            const url = ev.target.result;
+            document.getElementById('temp-avatar').src = url;
+            document.getElementById('user-img').src = url;
+            let data = JSON.parse(localStorage.getItem('uts_user_data')) || {};
+            data.avatar = url;
+            localStorage.setItem('uts_user_data', JSON.stringify(data));
+            if (instant && currentUser) {
+                await db.collection("users").doc(currentUser.uid).set(data, { merge: true });
+                showToast("📸 Photo mise à jour !");
+            }
+        };
+        reader.readAsDataURL(compressedFile);
+    } catch (error) { }
+}
+function updateProfileUI(data) {
+    document.getElementById('register-ui').classList.add('hidden');
+    document.getElementById('profile-ui').classList.remove('hidden');
+    document.getElementById('user-full-name').innerText = `${data.prenom || ''} ${data.nom || ''}`;
+    document.getElementById('user-sub').innerText = data.filiere || 'Étudiant';
+    if (data.avatar) document.getElementById('user-img').src = data.avatar;
+    const contactsDiv = document.getElementById('profile-contacts');
+    let html = '';
+    if (data.telephone) html += `<a href="https://wa.me/${data.telephone.replace(/\D/g,'')}" target="_blank" class="flex items-center gap-2 bg-green-500 text-white px-4 py-2 rounded-full font-bold text-xs"><i class="fab fa-whatsapp"></i> WhatsApp</a>`;
+    if (data.snapchat) html += `<a href="https://snapchat.com/add/${data.snapchat}" target="_blank" class="flex items-center gap-2 bg-yellow-400 text-white px-4 py-2 rounded-full font-bold text-xs"><i class="fab fa-snapchat"></i> Snapchat</a>`;
+    if (data.instagram) html += `<a href="https://instagram.com/${data.instagram}" target="_blank" class="flex items-center gap-2 bg-gradient-to-r from-pink-500 to-purple-500 text-white px-4 py-2 rounded-full font-bold text-xs"><i class="fab fa-instagram"></i> Instagram</a>`;
+    contactsDiv.innerHTML = html;
+}
+
+// ========== NOTES ==========
+async function searchNotes() {
+    const ine = document.getElementById('matSearch').value.trim().toUpperCase();
+    const res = document.getElementById('resultArea');
+    if (!ine) return showToast("Entrez votre INE");
+    res.innerHTML = '<div class="text-center text-gray-500">🔍 Recherche...</div>';
+    try {
+        const snap = await db.collection("notes").where("ine", "==", ine).get();
+        if (snap.empty) { res.innerHTML = `<div class="bg-blue-50 p-6 rounded-2xl text-center"><p class="font-bold text-blue-700">📭 Aucun résultat pour l'INE : ${ine}</p></div>`; return; }
+        let html = `<div class="space-y-4">`;
+        snap.forEach(doc => {
+            const n = doc.data();
+            html += `<div class="bg-white rounded-2xl border p-4 text-left shadow-sm"><div class="font-bold text-green-800">📚 ${(n.matiere || "Sans nom").replace(/</g, '&lt;')}</div><div class="text-2xl font-black text-green-700">${n.note || "?"}/20</div>${n.commentaire ? `<div class="text-sm italic text-gray-500 mt-1">"${n.commentaire.replace(/</g, '&lt;')}"</div>` : ''}</div>`;
+        });
+        html += `</div>`;
+        res.innerHTML = html;
+    } catch (error) { res.innerHTML = `<div class="text-red-500">❌ Consultation indisponible actuellement</div>`; }
+}
+
+// ========== AMIS ==========
+function updateFriendsList(docs) {
+    const list = document.getElementById('friendsList');
+    if (!list) return;
+    allFetchedUsers = [];
+    docs.forEach(doc => {
+        const u = doc.data();
+        const fullNom = `${u.prenom || ''} ${u.nom || ''}`.trim();
+        if (!fullNom || EXCLUDED_NAMES.some(ex => fullNom.toLowerCase().includes(ex.toLowerCase())
