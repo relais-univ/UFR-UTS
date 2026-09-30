@@ -238,4 +238,377 @@
             <div class="border-t pt-3 mt-2">
                 <p class="text-[11px] font-bold text-gray-500 mb-2 uppercase">Contacts</p>
                 <div class="space-y-3">
-                    <div class="relative"><i class="fab fa-whatsapp absolute left-4 top-4 text-green-500 text-lg"></i><input type="tel" id="reg-tel" placeholder="Numéro WhatsApp * (ex: 2
+                    <div class="relative"><i class="fab fa-whatsapp absolute left-4 top-4 text-green-500 text-lg"></i><input type="tel" id="reg-tel" placeholder="Numéro WhatsApp * (ex: 22670000000)" class="input-pro pl-12" required></div>
+                    <div class="relative"><i class="fab fa-snapchat absolute left-4 top-4 text-yellow-400 text-lg"></i><input type="text" id="reg-snap" placeholder="Pseudo Snapchat (optionnel)" class="input-pro pl-12"></div>
+                    <div class="relative"><i class="fab fa-instagram absolute left-4 top-4 text-pink-500 text-lg"></i><input type="text" id="reg-insta" placeholder="Pseudo Instagram (optionnel)" class="input-pro pl-12"></div>
+                </div>
+            </div>
+            <button id="btnEnregistrer" onclick="registerUser()" class="w-full uts-green text-white py-4 rounded-2xl font-bold mt-4">ENREGISTRER</button>
+            <button id="btnAnnulerModif" onclick="annulerModification()" class="hidden w-full bg-gray-200 text-gray-700 py-3 rounded-2xl font-bold mt-2">Annuler</button>
+        </div>
+
+        <div id="profile-ui" class="hidden bg-white p-8 rounded-[40px] card-shadow text-center">
+            <div class="relative w-32 h-32 mx-auto mb-4">
+                <img id="user-img" src="" class="w-full h-full rounded-full border-4 border-green-500 object-cover">
+                <label class="absolute bottom-0 right-0 w-10 h-10 uts-green text-white rounded-full flex items-center justify-center cursor-pointer border-2 border-white shadow-lg">
+                    <i class="fas fa-pen text-xs"></i>
+                    <input type="file" class="hidden" accept="image/*" onchange="previewImage(event, true)">
+                </label>
+            </div>
+            <h2 id="user-full-name" class="text-2xl font-black text-gray-800"></h2>
+            <p id="user-sub" class="text-green-600 font-bold text-xs uppercase tracking-wider mt-1"></p>
+            <div id="profile-contacts" class="mt-5 flex justify-center gap-3 flex-wrap"></div>
+            <button onclick="ouvrirModification()" class="mt-6 text-blue-600 font-bold text-xs uppercase">✏️ Modifier mon profil</button>
+            <button onclick="handleLogout()" class="mt-4 block mx-auto text-red-500 font-bold text-xs uppercase">Se déconnecter</button>
+        </div>
+    </section>
+</main>
+
+<nav class="fixed bottom-0 left-0 right-0 bg-white/90 backdrop-blur-md border-t p-1 flex justify-around shadow-2xl z-50">
+    <button onclick="switchView('home')" id="nav-home" class="nav-btn flex flex-col items-center p-1.5 active-nav"><i class="fas fa-home text-lg"></i><span class="text-[8px] font-bold mt-0.5">Accueil</span></button>
+    <button onclick="switchView('search')" id="nav-search" class="nav-btn flex flex-col items-center p-1.5 text-gray-400"><i class="fas fa-link text-lg"></i><span class="text-[8px] font-bold mt-0.5">Ressources</span></button>
+    <button onclick="switchView('box')" id="nav-box" class="nav-btn flex flex-col items-center p-1.5 text-gray-400"><i class="fas fa-film text-lg"></i><span class="text-[8px] font-bold mt-0.5">Box</span></button>
+    <button onclick="switchView('notes')" id="nav-notes" class="nav-btn flex flex-col items-center p-1.5 text-gray-400"><i class="fas fa-graduation-cap text-lg"></i><span class="text-[8px] font-bold mt-0.5">Notes</span></button>
+    <button onclick="switchView('community')" id="nav-community" class="nav-btn flex flex-col items-center p-1.5 text-gray-400"><i class="fas fa-users text-lg"></i><span class="text-[8px] font-bold mt-0.5">Amis</span></button>
+    <button onclick="switchView('profile')" id="nav-profile" class="nav-btn flex flex-col items-center p-1.5 text-gray-400"><i class="fas fa-user-circle text-lg"></i><span class="text-[8px] font-bold mt-0.5">Profil</span></button>
+</nav>
+
+<div id="imageModal" class="hidden fixed inset-0 z-[200] bg-black/90 flex items-center justify-center p-4" onclick="closeImageModal()">
+    <img id="modalImage" src="" class="max-w-full max-h-full object-contain rounded-lg">
+</div>
+
+<div id="videoModal" class="hidden fixed inset-0 z-[300] bg-black/95 flex flex-col">
+    <div class="flex justify-between items-center p-4 text-white">
+        <h3 id="videoTitle" class="font-bold text-sm truncate flex-1 mr-3"></h3>
+        <button onclick="closeVideoModal()" class="text-white text-2xl"><i class="fas fa-times"></i></button>
+    </div>
+    <div id="videoContainer" class="flex-1 flex items-center justify-center p-2"></div>
+    <div class="p-4 flex justify-center gap-3">
+        <button id="videoDownloadBtn" class="hidden items-center gap-2 bg-green-600 text-white px-5 py-2 rounded-full font-bold text-xs"><i class="fas fa-download"></i> Télécharger</button>
+    </div>
+</div>
+
+<div id="notifOverlay" class="hidden fixed inset-0 bg-black/50 z-[500]" onclick="closeNotifPanel()"></div>
+<div id="notifPanel" class="fixed top-0 right-0 h-full w-[85%] max-w-sm bg-white z-[501] shadow-2xl translate-x-full flex flex-col">
+    <div class="uts-green text-white p-4 flex items-center justify-between">
+        <div class="flex items-center gap-2">
+            <i class="fas fa-bell text-lg"></i>
+            <h3 class="font-bold">Notifications UTS</h3>
+        </div>
+        <button onclick="closeNotifPanel()" class="text-white text-xl"><i class="fas fa-times"></i></button>
+    </div>
+    <div id="notifList" class="flex-1 overflow-y-auto p-3 space-y-2">
+        <p class="text-xs text-gray-400 text-center py-8">Chargement...</p>
+    </div>
+    <div class="p-3 border-t">
+        <button onclick="markAllRead()" class="w-full text-xs font-bold text-gray-500 py-2">✓ Tout marquer comme lu</button>
+    </div>
+</div>
+
+<script>
+// ========== FIREBASE ==========
+const firebaseConfig = {
+    apiKey: "AIzaSyDXmjqF1DvqF0k8-YCUY-MHjyxRf6CBU78",
+    authDomain: "uts-e6211.firebaseapp.com",
+    projectId: "uts-e6211",
+    storageBucket: "uts-e6211.firebasestorage.app",
+    messagingSenderId: "520201058732",
+    appId: "1:520201058732:web:d2beaf37f46f7cd6daa209"
+};
+if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
+const db = firebase.firestore();
+const auth = firebase.auth();
+
+let currentUser = null;
+let lastArticleDoc = null;
+let isLoadingMore = false;
+let allArticlesLoaded = false;
+let allFetchedUsers = [];
+let modeModification = false;
+const EXCLUDED_NAMES = ["Étudiant UTS", "Anonyme", "Test"];
+
+// ========== TOAST ==========
+function showToast(m) {
+    const t = document.getElementById('uts-toast');
+    const msg = document.getElementById('toast-message');
+    if (t && msg) { msg.innerText = m; t.classList.add('show'); setTimeout(() => t.classList.remove('show'), 3000); }
+}
+
+// ========== NAVIGATION ==========
+function switchView(v) {
+    const titles = { 'home': "Fil d'actualité", 'search': "Ressources UTS", 'box': "UTS Box", 'notes': "Mes notes", 'community': "Mes Amis", 'profile': "Mon Profil" };
+    const pageTitle = document.getElementById('pageTitle');
+    if (pageTitle && titles[v]) pageTitle.innerText = titles[v];
+    document.querySelectorAll('.view-section').forEach(s => s.classList.remove('active'));
+    const target = document.getElementById('view-' + v);
+    if (target) target.classList.add('active');
+    document.querySelectorAll('.nav-btn').forEach(btn => { btn.classList.remove('active-nav'); btn.classList.add('text-gray-400'); });
+    const activeBtn = document.getElementById('nav-' + v);
+    if (activeBtn) { activeBtn.classList.add('active-nav'); activeBtn.classList.remove('text-gray-400'); }
+    if (v === 'home') loadInitialFeed();
+    if (v === 'box' && boxVideos.length === 0) loadBox(true);
+    if (v === 'community') loadStories();
+}
+function openSidebar() { document.getElementById('sidebar')?.classList.add('open'); document.getElementById('sidebarOverlay')?.classList.add('open'); }
+function closeSidebar() { document.getElementById('sidebar')?.classList.remove('open'); document.getElementById('sidebarOverlay')?.classList.remove('open'); }
+function openImageModal(src) { document.getElementById('modalImage').src = src; document.getElementById('imageModal').classList.remove('hidden'); }
+function closeImageModal() { document.getElementById('imageModal').classList.add('hidden'); }
+function handleLogout() {
+    if (confirm("Voulez-vous vraiment vous déconnecter ?")) {
+        auth.signOut().then(() => { localStorage.clear(); location.reload(); }).catch(() => { localStorage.clear(); location.reload(); });
+    }
+}
+
+// ========== ARTICLES ==========
+async function loadMoreArticles() {
+    if (isLoadingMore || allArticlesLoaded) return;
+    isLoadingMore = true;
+    let q = db.collection("articles").orderBy("createdAt", "desc").limit(5);
+    if (lastArticleDoc) q = db.collection("articles").orderBy("createdAt", "desc").startAfter(lastArticleDoc).limit(5);
+    try {
+        const snap = await q.get();
+        if (snap.empty) { allArticlesLoaded = true; document.getElementById('load-more-container')?.classList.add('hidden'); isLoadingMore = false; return; }
+        lastArticleDoc = snap.docs[snap.docs.length - 1];
+        const feed = document.getElementById('news-feed');
+        snap.forEach(doc => {
+            const art = doc.data();
+            const titre = art.title || art.titre || "";
+            const contenu = art.content || art.contenu || art.texte || "";
+            const image = art.imageUrl || art.image || null;
+            const imgHtml = image ? `<img src="${image}" class="w-full h-auto max-h-64 object-cover rounded-xl mb-3 mt-1" onerror="this.style.display='none'">` : '';
+            feed.innerHTML += `<div class="bg-white rounded-3xl overflow-hidden shadow-sm border border-gray-100 mb-4"><div class="p-5">${titre ? `<h3 class="font-black text-lg text-gray-800 mb-1">${titre.replace(/</g, '&lt;')}</h3>` : ''}${imgHtml}<p class="text-sm text-gray-600 leading-relaxed">${contenu.replace(/\n/g, '<br>').replace(/</g, '&lt;')}</p></div></div>`;
+        });
+        if (snap.docs.length < 5) allArticlesLoaded = true;
+        document.getElementById('load-more-container')?.classList.toggle('hidden', allArticlesLoaded);
+    } catch (e) { }
+    isLoadingMore = false;
+}
+function loadInitialFeed() {
+    lastArticleDoc = null; allArticlesLoaded = false;
+    document.getElementById('news-feed').innerHTML = '';
+    loadMoreArticles();
+}
+
+// ========== UTS BOX ==========
+let boxVideos = [];
+let boxCategory = 'afrique';
+let boxQuery = '';
+let boxPage = 1;
+let boxLoading = false;
+let boxHasMore = true;
+
+const PIPED_INSTANCES = [
+    'https://pipedapi.kavin.rocks',
+    'https://pipedapi.adminforge.de',
+    'https://api.piped.private.coffee',
+    'https://pipedapi.reallyaweso.me',
+    'https://pipedapi.drgns.space'
+];
+
+const BOX_CONFIG = {
+    afrique:   { src: 'youtube', q: 'cinéma africain documentaire burkina faso' },
+    docs:      { src: 'youtube', q: 'documentaire histoire science français' },
+    films:     { src: 'archive', q: 'language:(french OR francais OR fre) AND mediatype:movies AND collection:feature_films' },
+    actu:      { src: 'youtube', q: 'actualité afrique francophone 2024' },
+    musique:   { src: 'youtube', q: 'musique africaine francophone clip officiel' },
+    animation: { src: 'archive', q: 'language:(french OR francais) AND mediatype:movies AND (subject:animation OR subject:cartoon)' }
+};
+
+async function loadBox(reset = false) {
+    if (boxLoading) return;
+    if (reset) { boxVideos = []; boxPage = 1; boxHasMore = true; }
+    if (!boxHasMore) return;
+    boxLoading = true;
+    const grid = document.getElementById('boxGrid');
+    const loader = document.getElementById('boxLoader');
+    const empty = document.getElementById('boxEmpty');
+    const moreBtn = document.getElementById('boxMoreBtn');
+    if (reset) grid.innerHTML = '';
+    loader.classList.remove('hidden');
+    empty.classList.add('hidden');
+    moreBtn.classList.add('hidden');
+    try {
+        let items = [];
+        if (boxQuery) {
+            items = await searchYouTube(boxQuery);
+        } else {
+            const cfg = BOX_CONFIG[boxCategory];
+            if (cfg.src === 'archive') items = await fetchArchive(cfg.q, boxPage);
+            else items = await searchYouTube(cfg.q);
+        }
+        if (!items || items.length === 0) {
+            boxHasMore = false;
+            if (boxVideos.length === 0) empty.classList.remove('hidden');
+        } else {
+            boxVideos = boxVideos.concat(items);
+            renderBox();
+            boxHasMore = items.length >= 15;
+            if (boxHasMore) moreBtn.classList.remove('hidden');
+        }
+    } catch (e) {
+        if (boxVideos.length === 0) empty.classList.remove('hidden');
+    }
+    loader.classList.add('hidden');
+    boxLoading = false;
+}
+
+async function fetchArchive(query, page) {
+    const url = `https://archive.org/advancedsearch.php?q=${encodeURIComponent(query)}&fl[]=identifier&fl[]=title&fl[]=year&fl[]=creator&sort[]=downloads+desc&rows=15&page=${page}&output=json`;
+    const res = await fetch(url);
+    const data = await res.json();
+    const docs = data?.response?.docs || [];
+    return docs.map(d => ({
+        id: 'a_' + d.identifier,
+        title: (Array.isArray(d.title) ? d.title[0] : d.title) || 'Sans titre',
+        author: (Array.isArray(d.creator) ? d.creator[0] : d.creator) || '',
+        year: d.year || '',
+        thumb: `https://archive.org/services/img/${d.identifier}`,
+        type: 'archive',
+        embed: `https://archive.org/embed/${d.identifier}`,
+        source: `https://archive.org/details/${d.identifier}`
+    }));
+}
+
+async function searchYouTube(query) {
+    for (const inst of PIPED_INSTANCES) {
+        try {
+            const url = `${inst}/search?q=${encodeURIComponent(query)}&filter=videos`;
+            const controller = new AbortController();
+            const timeout = setTimeout(() => controller.abort(), 6000);
+            const res = await fetch(url, { signal: controller.signal });
+            clearTimeout(timeout);
+            if (!res.ok) continue;
+            const data = await res.json();
+            const items = (data?.items || []).filter(i => i.type === 'stream' && i.url);
+            if (items.length === 0) continue;
+            return items.slice(0, 15).map(v => {
+                const vid = (v.url || '').split('v=')[1]?.split('&')[0] || '';
+                return {
+                    id: 'y_' + vid,
+                    title: v.title || 'Sans titre',
+                    author: v.uploaderName || '',
+                    year: v.uploadedDate || '',
+                    thumb: v.thumbnail || `https://i.ytimg.com/vi/${vid}/mqdefault.jpg`,
+                    type: 'youtube',
+                    videoId: vid,
+                    duration: v.duration || 0
+                };
+            }).filter(v => v.videoId);
+        } catch (e) { continue; }
+    }
+    return [];
+}
+
+function renderBox() {
+    const grid = document.getElementById('boxGrid');
+    grid.innerHTML = boxVideos.map(v => {
+        const badge = v.type === 'youtube' && v.duration
+            ? `<span class="absolute bottom-2 right-2 bg-black/80 text-white text-[9px] px-1.5 py-0.5 rounded font-bold">${fmtDuration(v.duration)}</span>`
+            : '';
+        const yearBadge = v.year ? `<span class="absolute top-2 left-2 bg-black/70 text-white text-[9px] px-2 py-0.5 rounded-full font-bold">${String(v.year).slice(0,10)}</span>` : '';
+        const isYT = v.type === 'youtube';
+        return `
+        <div onclick="openVideo('${v.id}')" class="bg-white rounded-2xl overflow-hidden shadow-sm border border-gray-100 cursor-pointer active:scale-95 transition">
+            <div class="relative bg-gray-900 ${isYT ? 'aspect-video' : 'aspect-[3/4]'}">
+                <img src="${v.thumb}" class="w-full h-full object-cover" loading="lazy" onerror="this.src='https://via.placeholder.com/300x200/008751/ffffff?text=UTS'">
+                <div class="absolute inset-0 flex items-center justify-center bg-black/20">
+                    <i class="fas fa-play-circle text-white text-4xl drop-shadow-lg"></i>
+                </div>
+                ${yearBadge}${badge}
+            </div>
+            <div class="p-2.5">
+                <h4 class="font-bold text-[11px] text-gray-800 line-clamp-2 leading-tight">${(v.title||'').replace(/</g,'&lt;')}</h4>
+                ${v.author ? `<p class="text-[9px] text-gray-500 mt-1 truncate">${v.author.replace(/</g,'&lt;')}</p>` : ''}
+            </div>
+        </div>`;
+    }).join('');
+}
+
+function fmtDuration(s) {
+    if (!s) return '';
+    const h = Math.floor(s / 3600);
+    const m = Math.floor((s % 3600) / 60);
+    const sec = s % 60;
+    if (h > 0) return `${h}:${String(m).padStart(2,'0')}:${String(sec).padStart(2,'0')}`;
+    return `${m}:${String(sec).padStart(2,'0')}`;
+}
+
+function setBoxCategory(cat) {
+    hideOffline();
+    boxCategory = cat;
+    boxQuery = '';
+    document.getElementById('boxSearch').value = '';
+    document.querySelectorAll('.box-cat-btn').forEach(b => b.classList.toggle('active-cat', b.dataset.cat === cat));
+    loadBox(true);
+}
+function doBoxSearch() {
+    const q = document.getElementById('boxSearch').value.trim();
+    if (!q) return loadBox(true);
+    hideOffline();
+    boxQuery = q;
+    document.querySelectorAll('.box-cat-btn').forEach(b => b.classList.remove('active-cat'));
+    loadBox(true);
+}
+function loadMoreBox() { boxPage++; loadBox(false); }
+
+function openVideo(id) {
+    const v = boxVideos.find(x => x.id === id);
+    if (!v) return;
+    document.getElementById('videoTitle').innerText = v.title;
+    const container = document.getElementById('videoContainer');
+    const dlBtn = document.getElementById('videoDownloadBtn');
+    if (v.type === 'youtube') {
+        container.innerHTML = `<iframe src="https://www.youtube.com/embed/${v.videoId}?autoplay=1&rel=0" class="w-full h-full max-w-4xl aspect-video rounded-lg" frameborder="0" allow="autoplay; encrypted-media; fullscreen" allowfullscreen></iframe>`;
+        dlBtn.classList.remove('hidden');
+        dlBtn.classList.add('flex');
+        dlBtn.onclick = () => downloadYouTube(v);
+    } else {
+        container.innerHTML = `<iframe src="${v.embed}" class="w-full h-full max-w-4xl aspect-video rounded-lg" frameborder="0" allowfullscreen></iframe>`;
+        dlBtn.classList.remove('hidden');
+        dlBtn.classList.add('flex');
+        dlBtn.onclick = () => downloadArchive(v);
+    }
+    saveToHistory(v);
+    document.getElementById('videoModal').classList.remove('hidden');
+}
+function closeVideoModal() {
+    document.getElementById('videoModal').classList.add('hidden');
+    document.getElementById('videoContainer').innerHTML = '';
+    if (marqueePaused) setTimeout(() => { marqueePaused = false; }, 1500);
+}
+
+async function downloadYouTube(v) {
+    showToast("⏳ Préparation du téléchargement...");
+    for (const inst of PIPED_INSTANCES) {
+        try {
+            const controller = new AbortController();
+            const timeout = setTimeout(() => controller.abort(), 8000);
+            const res = await fetch(`${inst}/streams/${v.videoId}`, { signal: controller.signal });
+            clearTimeout(timeout);
+            if (!res.ok) continue;
+            const data = await res.json();
+            const streams = (data?.videoStreams || [])
+                .filter(s => s.mimeType && s.mimeType.includes('mp4') && s.videoOnly !== true)
+                .sort((a, b) => (b.bitrate || 0) - (a.bitrate || 0));
+            if (streams.length === 0) continue;
+            const best = streams.find(s => s.quality === '720p') || streams[0];
+            const a = document.createElement('a');
+            a.href = best.url;
+            a.target = '_blank';
+            a.rel = 'noopener';
+            a.download = (v.title || 'video') + '.mp4';
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            showToast("✅ Téléchargement lancé !");
+            saveToOffline(v, best.url);
+            return;
+        } catch (e) { continue; }
+    }
+    showToast("⚠️ Téléchargement indisponible. Essayez une autre vidéo.");
+}
+
+function downloadArchive(v) {
+    window.open(v.source.replace('/details/', '/download/'), '_blank');
+    showToast("✅ Téléchargement lancé !");
+    s
