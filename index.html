@@ -1023,4 +1023,165 @@ function updateProfileUI(data) {
     let html = '';
     if (data.telephone) html += `<a href="https://wa.me/${data.telephone.replace(/\D/g,'')}" target="_blank" class="flex items-center gap-2 bg-green-500 text-white px-4 py-2 rounded-full font-bold text-xs"><i class="fab fa-whatsapp"></i> WhatsApp</a>`;
     if (data.snapchat) html += `<a href="https://snapchat.com/add/${data.snapchat}" target="_blank" class="flex items-center gap-2 bg-yellow-400 text-white px-4 py-2 rounded-full font-bold text-xs"><i class="fab fa-snapchat"></i> Snapchat</a>`;
-    if (data.instagram) html += `<a href="https://instagram.com/${data.instagram}" target=
+    if (data.instagram) html += `<a href="https://instagram.com/${data.instagram}" target="_blank" class="flex items-center gap-2 bg-gradient-to-r from-pink-500 to-purple-500 text-white px-4 py-2 rounded-full font-bold text-xs"><i class="fab fa-instagram"></i> Instagram</a>`;
+    contactsDiv.innerHTML = html;
+}
+
+// ========== NOTES ==========
+async function searchNotes() {
+    const ine = document.getElementById('matSearch').value.trim().toUpperCase();
+    const res = document.getElementById('resultArea');
+    if (!ine) return showToast("Entrez votre INE");
+    res.innerHTML = '<div class="text-center text-gray-500">🔍 Recherche...</div>';
+    try {
+        const snap = await db.collection("notes").where("ine", "==", ine).get();
+        if (snap.empty) { res.innerHTML = `<div class="bg-blue-50 p-6 rounded-2xl text-center"><p class="font-bold text-blue-700">📭 Aucun résultat pour l'INE : ${ine}</p></div>`; return; }
+        let html = `<div class="space-y-4">`;
+        snap.forEach(doc => {
+            const n = doc.data();
+            html += `<div class="bg-white rounded-2xl border p-4 text-left shadow-sm"><div class="font-bold text-green-800">📚 ${(n.matiere || "Sans nom").replace(/</g, '&lt;')}</div><div class="text-2xl font-black text-green-700">${n.note || "?"}/20</div>${n.commentaire ? `<div class="text-sm italic text-gray-500 mt-1">"${n.commentaire.replace(/</g, '&lt;')}"</div>` : ''}</div>`;
+        });
+        html += `</div>`;
+        res.innerHTML = html;
+    } catch (error) { res.innerHTML = `<div class="text-red-500">❌ Consultation indisponible actuellement</div>`; }
+}
+
+// ========== AMIS ==========
+function updateFriendsList(docs) {
+    const list = document.getElementById('friendsList');
+    if (!list) return;
+    allFetchedUsers = [];
+    docs.forEach(doc => {
+        const u = doc.data();
+        const fullNom = `${u.prenom || ''} ${u.nom || ''}`.trim();
+        if (!fullNom || EXCLUDED_NAMES.some(ex => fullNom.toLowerCase().includes(ex.toLowerCase()))) return;
+        if (currentUser && doc.id === currentUser.uid) return;
+        allFetchedUsers.push({ id: doc.id, ...u, fullNom });
+    });
+    if (allFetchedUsers.length === 0) { list.innerHTML = `<p class="text-xs text-gray-400 text-center py-8">Aucun étudiant connecté pour le moment.</p>`; return; }
+    renderFriends(allFetchedUsers);
+}
+function renderFriends(usersArray) {
+    const list = document.getElementById('friendsList');
+    if (!list) return;
+    list.innerHTML = usersArray.map(u => {
+        let boutons = '';
+        if (u.telephone) boutons += `<a href="https://wa.me/${u.telephone.replace(/\D/g,'')}" target="_blank" onclick="event.stopPropagation()" class="flex items-center justify-center gap-1 bg-green-500 hover:bg-green-600 text-white px-3 py-1.5 rounded-full font-bold text-[10px] transition"><i class="fab fa-whatsapp text-sm"></i> WhatsApp</a>`;
+        if (u.snapchat) boutons += `<a href="https://snapchat.com/add/${u.snapchat}" target="_blank" onclick="event.stopPropagation()" class="flex items-center justify-center gap-1 bg-yellow-400 hover:bg-yellow-500 text-white px-3 py-1.5 rounded-full font-bold text-[10px] transition"><i class="fab fa-snapchat text-sm"></i> Snapchat</a>`;
+        if (u.instagram) boutons += `<a href="https://instagram.com/${u.instagram}" target="_blank" onclick="event.stopPropagation()" class="flex items-center justify-center gap-1 bg-gradient-to-r from-pink-500 to-purple-500 text-white px-3 py-1.5 rounded-full font-bold text-[10px] transition"><i class="fab fa-instagram text-sm"></i> Instagram</a>`;
+        const boutonsHtml = boutons ? `<div class="flex flex-wrap gap-2 mt-2">${boutons}</div>` : `<p class="text-[10px] text-gray-400 mt-2 italic">Aucun contact renseigné</p>`;
+        return `<div class="p-4 hover:bg-gray-50 transition"><div class="flex items-center gap-4"><img src="${u.avatar || 'https://cdn-icons-png.flaticon.com/512/149/149071.png'}" class="w-14 h-14 rounded-full object-cover border-2 border-green-500"><div class="flex-1 min-w-0"><h4 class="font-bold text-sm text-gray-800">${u.fullNom}</h4></div></div>${boutonsHtml}</div>`;
+    }).join('');
+}
+function filterFriendsList() {
+    const query = document.getElementById('searchFriend')?.value.toLowerCase().trim() || "";
+    const filtered = allFetchedUsers.filter(u => u.fullNom.toLowerCase().includes(query));
+    renderFriends(filtered);
+}
+
+// ========== PWA / INSTALLATION ==========
+let deferredPrompt = null;
+window.addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); deferredPrompt = e; });
+
+function installApp() {
+    const ua = navigator.userAgent.toLowerCase();
+    const isIOS = /iphone|ipad|ipod/.test(ua);
+    const isAndroid = /android/.test(ua);
+    const isStandalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
+
+    if (isStandalone) {
+        showToast("✅ UTS Social est déjà installé sur votre appareil");
+        return;
+    }
+
+    if (deferredPrompt) {
+        deferredPrompt.prompt();
+        deferredPrompt.userChoice.then((choice) => {
+            if (choice.outcome === 'accepted') {
+                showToast("🎉 Installation en cours...");
+            } else {
+                showToast("Installation annulée");
+            }
+            deferredPrompt = null;
+        });
+        return;
+    }
+
+    if (isIOS) { showIOSGuide(); return; }
+    if (isAndroid) { showToast("📱 Menu du navigateur ⋮ → Installer l'application"); return; }
+    showToast("💻 Barre d'adresse → icône ⊕ → Installer");
+}
+
+function showIOSGuide() {
+    const existing = document.getElementById('iosGuide');
+    if (existing) existing.remove();
+    const guide = document.createElement('div');
+    guide.id = 'iosGuide';
+    guide.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.85);z-index:9999;display:flex;align-items:center;justify-content:center;padding:24px;';
+    guide.innerHTML = `
+        <div style="background:white;border-radius:24px;padding:24px;max-width:340px;width:100%;text-align:center;position:relative;">
+            <button onclick="document.getElementById('iosGuide').remove()" style="position:absolute;top:10px;right:14px;font-size:22px;color:#999;background:none;border:none;cursor:pointer;">×</button>
+            <div style="font-size:40px;margin-bottom:8px;">📱</div>
+            <h3 style="font-weight:900;font-size:16px;color:#111;margin-bottom:4px;">Installer UTS Social</h3>
+            <p style="font-size:12px;color:#666;margin-bottom:20px;">Suivez ces 2 étapes sur votre iPhone</p>
+
+            <div style="background:#f3f4f6;border-radius:14px;padding:14px;text-align:left;margin-bottom:12px;">
+                <div style="display:flex;gap:10px;align-items:flex-start;">
+                    <div style="background:#008751;color:white;width:24px;height:24px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:bold;font-size:12px;flex-shrink:0;">1</div>
+                    <div>
+                        <div style="font-weight:bold;font-size:13px;color:#111;">Appuyez sur Partager</div>
+                        <div style="font-size:11px;color:#666;margin-top:2px;">Icône <span style="display:inline-block;background:#e5e7eb;border-radius:4px;padding:1px 5px;font-weight:bold;">⬆️</span> en bas de Safari</div>
+                    </div>
+                </div>
+            </div>
+
+            <div style="background:#f3f4f6;border-radius:14px;padding:14px;text-align:left;margin-bottom:20px;">
+                <div style="display:flex;gap:10px;align-items:flex-start;">
+                    <div style="background:#008751;color:white;width:24px;height:24px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:bold;font-size:12px;flex-shrink:0;">2</div>
+                    <div>
+                        <div style="font-weight:bold;font-size:13px;color:#111;">« Sur l'écran d'accueil »</div>
+                        <div style="font-size:11px;color:#666;margin-top:2px;">Faites défiler et sélectionnez cette option</div>
+                    </div>
+                </div>
+            </div>
+
+            <button onclick="document.getElementById('iosGuide').remove()" style="background:#008751;color:white;border:none;border-radius:14px;padding:12px;width:100%;font-weight:bold;font-size:14px;cursor:pointer;">
+                J'ai compris
+            </button>
+        </div>
+    `;
+    document.body.appendChild(guide);
+}
+
+// ========== AUTH ==========
+auth.onAuthStateChanged(async (user) => {
+    if (!user) {
+        await auth.signInAnonymously();
+    } else {
+        currentUser = user;
+        const saved = localStorage.getItem('uts_user_data');
+        if (saved) updateProfileUI(JSON.parse(saved));
+        db.collection("users").orderBy("date", "desc").onSnapshot(snap => updateFriendsList(snap.docs));
+    }
+});
+
+window.onload = () => {
+    if (!localStorage.getItem('uts_registered')) switchView('profile');
+    else switchView('home');
+    setTimeout(() => { loadNotifications(); }, 1500);
+};
+
+Object.assign(window, {
+    switchView, openSidebar, closeSidebar, openImageModal, closeImageModal,
+    handleLogout, installApp, registerUser, previewImage,
+    searchNotes, showToast, loadMoreArticles, filterFriendsList,
+    ouvrirModification, annulerModification,
+    setBoxCategory, doBoxSearch, loadMoreBox, openVideo, closeVideoModal, loadBox,
+    removeOffline, hideOffline, showOffline, playOffline,
+    openStory, loadStories,
+    openNotifPanel, closeNotifPanel, markAllRead, loadNotifications,
+    showIOSGuide
+});
+</script>
+</body>
+</html>
