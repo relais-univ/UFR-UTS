@@ -1,0 +1,305 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Administration - UTS Social</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/browser-image-compression@2.0.2/dist/browser-image-compression.min.js"></script>
+    <script type="importmap">
+        {
+            "imports": {
+                "firebase/app": "https://www.gstatic.com/firebasejs/11.0.0/firebase-app.js",
+                "firebase/firestore": "https://www.gstatic.com/firebasejs/11.0.0/firebase-firestore.js",
+                "firebase/auth": "https://www.gstatic.com/firebasejs/11.0.0/firebase-auth.js"
+            }
+        }
+    </script>
+    <style>
+        .uts-green { background-color: #008751; }
+        .admin-card { transition: all 0.3s ease; }
+        .admin-card:hover { transform: translateY(-3px); box-shadow: 0 10px 25px -5px rgba(0,0,0,0.1); }
+        .tab-active { background-color: #008751; color: white; }
+        .tab-inactive { background-color: #e5e7eb; color: #374151; }
+        .preview-box { border: 2px dashed #cbd5e1; transition: all 0.2s; }
+        .preview-box:hover { border-color: #008751; }
+    </style>
+</head>
+<body class="bg-gray-100 font-sans">
+
+    <div id="loginScreen" class="fixed inset-0 z-[300] bg-gray-100 flex items-center justify-center">
+        <div class="bg-white rounded-2xl p-8 w-[90%] max-w-md shadow-xl text-center">
+            <div class="uts-logo w-20 h-20 bg-white rounded-full flex items-center justify-center text-3xl font-bold mx-auto shadow-md" style="background: white;">
+                <span style="color: #EF4444;">U</span><span style="color: #EAB308;">T</span><span style="color: #22C55E;">S</span>
+            </div>
+            <h2 class="text-2xl font-bold mt-4 text-gray-800">Administration</h2>
+            <p class="text-gray-500 text-sm mb-6">Espace réservé</p>
+            <input type="password" id="adminPassword" placeholder="Mot de passe" class="input-pro w-full mb-4 text-center" style="background: #f3f4f6; border-radius: 15px; padding: 12px;" onkeydown="if(event.key==='Enter') checkAdminPassword()">
+            <button onclick="checkAdminPassword()" class="w-full uts-green text-white py-3 rounded-xl font-bold">SE CONNECTER</button>
+            <p class="text-xs text-gray-400 mt-4">Accès restreint</p>
+        </div>
+    </div>
+
+    <div id="adminContent" class="hidden">
+        <header class="uts-green text-white p-4 sticky top-0 z-50 shadow-md flex justify-between items-center">
+            <div class="flex items-center gap-2">
+                <div class="uts-logo w-10 h-10 bg-white rounded-full flex items-center justify-center text-xl font-bold">
+                    <span style="color: #EF4444;">U</span><span style="color: #EAB308;">T</span><span style="color: #22C55E;">S</span>
+                </div>
+                <h1 class="text-lg font-bold">Administration</h1>
+            </div>
+            <button onclick="logoutAdmin()" class="bg-red-600 text-white px-4 py-1 rounded-full text-sm font-bold">🔒 Déconnexion</button>
+        </header>
+
+        <main class="max-w-4xl mx-auto p-4">
+            <div class="grid grid-cols-2 md:grid-cols-5 gap-3 mb-6">
+                <div class="bg-white rounded-xl p-3 text-center shadow-sm">
+                    <i class="fas fa-newspaper text-2xl text-green-600"></i>
+                    <p class="text-2xl font-bold" id="totalArticles">0</p>
+                    <p class="text-xs text-gray-500">Articles</p>
+                </div>
+                <div class="bg-white rounded-xl p-3 text-center shadow-sm">
+                    <i class="fas fa-graduation-cap text-2xl text-green-600"></i>
+                    <p class="text-2xl font-bold" id="totalNotes">0</p>
+                    <p class="text-xs text-gray-500">Notes</p>
+                </div>
+                <div class="bg-white rounded-xl p-3 text-center shadow-sm">
+                    <i class="fas fa-users text-2xl text-green-600"></i>
+                    <p class="text-2xl font-bold" id="totalUsers">0</p>
+                    <p class="text-xs text-gray-500">Étudiants</p>
+                </div>
+                <div class="bg-white rounded-xl p-3 text-center shadow-sm">
+                    <i class="fas fa-bell text-2xl text-green-600"></i>
+                    <p class="text-2xl font-bold" id="totalNotifs">0</p>
+                    <p class="text-xs text-gray-500">Notifs</p>
+                </div>
+                <div class="bg-white rounded-xl p-3 text-center shadow-sm">
+                    <i class="fas fa-bullhorn text-2xl text-green-600"></i>
+                    <p class="text-2xl font-bold" id="totalTicker">0</p>
+                    <p class="text-xs text-gray-500">Infos</p>
+                </div>
+            </div>
+
+            <div class="flex gap-2 mb-6 overflow-x-auto pb-2 no-scrollbar">
+                <button onclick="showTab('articles')" id="tabArticles" class="tab-active px-4 py-2 rounded-full font-bold text-sm transition whitespace-nowrap">📝 Articles</button>
+                <button onclick="showTab('notifications')" id="tabNotifications" class="tab-inactive px-4 py-2 rounded-full font-bold text-sm transition whitespace-nowrap">🔔 Notifications</button>
+                <button onclick="showTab('ticker')" id="tabTicker" class="tab-inactive px-4 py-2 rounded-full font-bold text-sm transition whitespace-nowrap">📢 Info Défilante</button>
+                <button onclick="showTab('notes')" id="tabNotes" class="tab-inactive px-4 py-2 rounded-full font-bold text-sm transition whitespace-nowrap">📚 Notes</button>
+                <button onclick="showTab('import')" id="tabImport" class="tab-inactive px-4 py-2 rounded-full font-bold text-sm transition whitespace-nowrap">📁 CSV</button>
+                <button onclick="showTab('cleanup')" id="tabCleanup" class="tab-inactive px-4 py-2 rounded-full font-bold text-sm transition whitespace-nowrap">🗑️ Nettoyage</button>
+            </div>
+
+            <!-- ONGLET ARTICLES -->
+            <div id="articlesTab" class="space-y-4">
+                <div class="bg-white rounded-2xl p-5 shadow-sm">
+                    <h2 class="text-xl font-bold text-green-700 mb-4">📝 Publier un article</h2>
+                    <div class="grid md:grid-cols-2 gap-4">
+                        <div>
+                            <input type="text" id="articleTitle" placeholder="Titre de l'article" class="input-pro w-full mb-3 border p-2 rounded-xl">
+                            <textarea id="articleContent" rows="6" placeholder="Contenu de l'article..." class="input-pro w-full mb-3 border p-2 rounded-xl"></textarea>
+                            
+                            <div class="mb-3">
+                                <label class="block text-sm font-bold text-gray-700 mb-2">📷 Photo (depuis la galerie)</label>
+                                <div class="flex items-center gap-3">
+                                    <label class="cursor-pointer bg-green-50 border-2 border-dashed border-green-300 hover:border-green-500 rounded-xl px-4 py-3 flex items-center gap-2 transition">
+                                        <i class="fas fa-image text-green-600 text-xl"></i>
+                                        <span class="font-bold text-green-700 text-sm">Choisir une image</span>
+                                        <input type="file" id="articleImageFile" accept="image/*" class="hidden" onchange="selectArticleImage(event)">
+                                    </label>
+                                    <button type="button" onclick="clearArticleImage()" id="btnClearImage" class="hidden text-red-500 font-bold text-sm hover:underline">✖ Retirer</button>
+                                </div>
+                                <div id="imagePreviewContainer" class="mt-3 hidden relative inline-block">
+                                    <img id="imagePreview" class="w-32 h-32 rounded-xl object-cover border-2 border-green-500 shadow">
+                                    <div id="compressInfo" class="absolute bottom-1 left-1 right-1 bg-black/70 text-white text-[9px] text-center py-0.5 rounded font-bold"></div>
+                                </div>
+                                <p class="text-[10px] text-gray-400 mt-2">L'image sera automatiquement compressée.</p>
+                            </div>
+                            
+                            <div class="grid grid-cols-2 gap-3 mb-4">
+                                <select id="expiryType" class="input-pro border p-2 rounded-xl">
+                                    <option value="never">Jamais</option>
+                                    <option value="7">7 jours</option>
+                                    <option value="30">30 jours</option>
+                                    <option value="custom">Date personnalisée</option>
+                                </select>
+                                <input type="date" id="customExpiry" class="input-pro hidden border p-2 rounded-xl">
+                            </div>
+                            <button onclick="publishArticle()" class="uts-green text-white px-6 py-2 rounded-xl font-bold">📤 Publier</button>
+                        </div>
+                        
+                        <div class="border rounded-xl p-4 bg-gray-50 preview-box">
+                            <h3 class="font-bold text-gray-700 mb-2 flex items-center gap-2"><i class="fas fa-eye"></i> Aperçu</h3>
+                            <div id="previewTitle" class="font-bold text-green-700 text-lg mb-2">Titre de l'article</div>
+                            <div id="previewContent" class="text-sm text-gray-700 whitespace-pre-wrap">Le contenu apparaîtra ici...</div>
+                            <div id="previewImageBox" class="mt-2"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="bg-white rounded-2xl p-5 shadow-sm">
+                    <h2 class="text-xl font-bold text-green-700 mb-4">📋 Articles publiés</h2>
+                    <div id="articlesList" class="space-y-3 max-h-96 overflow-y-auto">
+                        <p class="text-gray-400 text-center py-4">Chargement...</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ONGLET NOTIFICATIONS -->
+            <div id="notificationsTab" class="hidden space-y-4">
+                <div class="bg-white rounded-2xl p-5 shadow-sm">
+                    <h2 class="text-xl font-bold text-green-700 mb-2">🔔 Envoyer une notification</h2>
+                    <p class="text-sm text-gray-500 mb-4">La cloche va s'allumer avec un badge rouge chez tous les étudiants.</p>
+                    
+                    <input type="text" id="notifTitre" placeholder="Titre (ex: Inscriptions ouvertes)" class="input-pro w-full mb-3 border p-2 rounded-xl">
+                    <textarea id="notifMessage" rows="3" placeholder="Message (ex: Du 15 au 30 octobre sur Campus Faso)" class="input-pro w-full mb-3 border p-2 rounded-xl"></textarea>
+                    
+                    <div class="grid grid-cols-2 gap-3 mb-3">
+                        <select id="notifType" class="input-pro border p-2 rounded-xl">
+                            <option value="info">🟢 Info (vert)</option>
+                            <option value="event">🟡 Événement (jaune)</option>
+                            <option value="urgent">🔴 Urgent (rouge)</option>
+                        </select>
+                        <input type="url" id="notifLien" placeholder="Lien (optionnel)" class="input-pro border p-2 rounded-xl">
+                    </div>
+                    
+                    <button onclick="publishNotification()" class="uts-green text-white px-6 py-2 rounded-xl font-bold">📤 Envoyer la notification</button>
+                </div>
+
+                <div class="bg-white rounded-2xl p-5 shadow-sm">
+                    <h2 class="text-xl font-bold text-green-700 mb-4">📋 Notifications envoyées</h2>
+                    <div id="notifsList" class="space-y-3 max-h-96 overflow-y-auto">
+                        <p class="text-gray-400 text-center py-4">Chargement...</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ONGLET TICKER -->
+            <div id="tickerTab" class="hidden space-y-4">
+                <div class="bg-white rounded-2xl p-5 shadow-sm">
+                    <h2 class="text-xl font-bold text-green-700 mb-2">📢 Info défilante (bandeau rouge)</h2>
+                    <p class="text-sm text-gray-500 mb-4">Le texte va défiler en continu en haut de l'application.</p>
+                    
+                    <input type="text" id="tickerMessage" placeholder="Ex: Assemblée générale à 14h - Amphi B" class="input-pro w-full mb-3 border p-2 rounded-xl">
+                    
+                    <div class="bg-blue-50 border border-blue-200 p-3 rounded-xl mb-3 text-xs text-blue-800">
+                        <i class="fas fa-info-circle"></i> Ajoutez plusieurs messages : ils défileront l'un après l'autre. Pour désactiver un message sans le supprimer, utilisez le bouton sur la liste ci-dessous.
+                    </div>
+                    
+                    <button onclick="publishTicker()" class="uts-green text-white px-6 py-2 rounded-xl font-bold">📤 Publier</button>
+                </div>
+
+                <div class="bg-white rounded-2xl p-5 shadow-sm">
+                    <h2 class="text-xl font-bold text-green-700 mb-4">📋 Messages actifs</h2>
+                    <div id="tickerList" class="space-y-3 max-h-96 overflow-y-auto">
+                        <p class="text-gray-400 text-center py-4">Chargement...</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ONGLET NOTES -->
+            <div id="notesTab" class="hidden space-y-4">
+                <div class="bg-white rounded-2xl p-5 shadow-sm">
+                    <h2 class="text-xl font-bold text-green-700 mb-4">➕ Ajouter une note</h2>
+                    <div class="grid grid-cols-2 gap-3">
+                        <input type="text" id="noteIne" placeholder="INE *" class="input-pro border p-2 rounded-xl">
+                        <input type="text" id="noteMatiere" placeholder="Matière *" class="input-pro border p-2 rounded-xl">
+                        <input type="number" id="noteValue" placeholder="Note /20 *" class="input-pro border p-2 rounded-xl" step="0.5">
+                        <select id="noteSemestre" class="input-pro border p-2 rounded-xl">
+                            <option value="S1">Semestre 1</option><option value="S2">Semestre 2</option>
+                            <option value="S3">Semestre 3</option><option value="S4">Semestre 4</option>
+                            <option value="S5">Semestre 5</option><option value="S6">Semestre 6</option>
+                        </select>
+                    </div>
+                    <textarea id="noteCommentaire" rows="2" placeholder="Commentaire (optionnel)" class="input-pro w-full mt-3 border p-2 rounded-xl"></textarea>
+                    <button onclick="addSingleNote()" class="uts-green text-white px-6 py-2 rounded-xl font-bold mt-3">💾 Enregistrer</button>
+                </div>
+                <div class="bg-white rounded-2xl p-5 shadow-sm">
+                    <h2 class="text-xl font-bold text-green-700 mb-4">🔍 Rechercher / Supprimer</h2>
+                    <div class="flex gap-2 mb-4">
+                        <input type="text" id="searchIne" placeholder="Rechercher par INE..." class="input-pro flex-1 border p-2 rounded-xl">
+                        <button onclick="searchNotes()" class="uts-green text-white px-4 py-2 rounded-xl">🔍</button>
+                    </div>
+                    <div id="notesList" class="max-h-96 overflow-y-auto">
+                        <p class="text-gray-400 text-center py-4">Chargement...</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ONGLET IMPORT CSV -->
+            <div id="importTab" class="hidden space-y-4">
+                <div class="bg-white rounded-2xl p-5 shadow-sm">
+                    <h2 class="text-xl font-bold text-green-700 mb-4">📁 Import CSV</h2>
+                    <p class="text-sm text-gray-500 mb-3">Format : INE, Matière, Note, Semestre, Commentaire</p>
+                    <textarea id="csvData" rows="8" placeholder="12345,Maths,15,S1,Très bien&#10;12345,Physique,12,S1,Passable" class="input-pro w-full mb-3 font-mono text-sm border p-2 rounded-xl"></textarea>
+                    <button onclick="importCSV()" class="uts-green text-white px-6 py-2 rounded-xl font-bold">📤 Importer</button>
+                    <div id="importResult" class="mt-3 text-sm"></div>
+                </div>
+            </div>
+
+            <!-- ONGLET NETTOYAGE -->
+            <div id="cleanupTab" class="hidden space-y-4">
+                <div class="bg-white rounded-2xl p-5 shadow-sm">
+                    <h2 class="text-xl font-bold text-green-700 mb-4">🗑️ Nettoyage</h2>
+                    <p class="text-gray-600 mb-3">Supprime les articles dont la date d'expiration est dépassée.</p>
+                    <button onclick="cleanupExpired()" class="bg-red-600 text-white px-6 py-2 rounded-xl font-bold">🧹 Nettoyer maintenant</button>
+                    <div id="cleanupResult" class="mt-3 text-sm"></div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <script type="module">
+        import { initializeApp } from "firebase/app";
+        import { getFirestore, collection, addDoc, getDocs, deleteDoc, doc, query, where, orderBy, Timestamp, updateDoc } from "firebase/firestore";
+        import { getAuth, signInAnonymously, onAuthStateChanged } from "firebase/auth";
+
+        const firebaseConfig = {
+            apiKey: "AIzaSyDXmjqF1DvqF0k8-YCUY-MHjyxRf6CBU78",
+            authDomain: "uts-e6211.firebaseapp.com",
+            projectId: "uts-e6211",
+            storageBucket: "uts-e6211.firebasestorage.app",
+            messagingSenderId: "520201058732",
+            appId: "1:520201058732:web:d2beaf37f46f7cd6daa209"
+        };
+
+        const app = initializeApp(firebaseConfig);
+        const db = getFirestore(app);
+        const auth = getAuth(app);
+
+        const ADMIN_PASSWORD = "20251";
+        let articleImageBase64 = null;
+
+        // --- FONCTIONS GLOBALES ---
+        window.checkAdminPassword = function() {
+            const pwd = document.getElementById('adminPassword').value;
+            if (pwd === ADMIN_PASSWORD) {
+                localStorage.setItem('admin_logged', 'true');
+                document.getElementById('loginScreen').classList.add('hidden');
+                document.getElementById('adminContent').classList.remove('hidden');
+                window.loadStats();
+                window.loadArticles();
+                window.loadNotifications();
+                window.loadTickerList();
+                window.loadAllNotes();
+            } else {
+                alert("❌ Mot de passe incorrect");
+            }
+        };
+
+        window.logoutAdmin = function() {
+            localStorage.removeItem('admin_logged');
+            location.reload();
+        };
+
+        window.selectArticleImage = async function(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+            const preview = document.getElementById('imagePreview');
+            const container = document.getElementById('imagePreviewContainer');
+            const info = document.getElementById('compressInfo');
+            try {
+                container.classList.remove('hidden');
+                preview.src = URL.createObjectURL(file);
+                info.innerText = "⏳ Compression...";
+                const compressed = await imageCompression(file, { maxSizeMB: 
