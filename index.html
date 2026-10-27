@@ -523,7 +523,16 @@ async function searchYouTube(query) {
             if (items.length === 0) continue;
             return items.slice(0, 15).map(v => {
                 const vid = (v.url || '').split('v=')[1]?.split('&')[0] || '';
-                return { id: 'y_' + vid, title: v.title || 'Sans titre', author: v.uploaderName || '', year: v.uploadedDate || '',thumb: `https://img.youtube.com/vi/${vid}/hqdefault.jpg`,`, type: 'youtube', videoId: vid, duration: v.duration || 0 };
+                return { 
+                    id: 'y_' + vid, 
+                    title: v.title || 'Sans titre', 
+                    author: v.uploaderName || '', 
+                    year: v.uploadedDate || '', 
+                    thumb: `https://img.youtube.com/vi/${vid}/hqdefault.jpg`, 
+                    type: 'youtube', 
+                    videoId: vid, 
+                    duration: v.duration || 0 
+                };
             }).filter(v => v.videoId);
         } catch (e) { continue; }
     }
