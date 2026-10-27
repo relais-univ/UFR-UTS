@@ -92,7 +92,9 @@
             <i class="fas fa-bell text-xl"></i>
             <span id="notifBadge" class="notif-badge hidden">0</span>
         </div>
-        <i class="fas fa-users text-xl cursor-pointer" onclick="switchView('community')"></i>
+        <i class="fas fa-users text-xl cursor-pointer" onclick="switchView('community')"></i><button onclick="shareApp()" class="text-white text-xl hover:text-green-200 transition" title="Partager">
+    <i class="fas fa-share-nodes"></i>
+        </button>
         <button onclick="installApp()" id="installBtn" class="text-sm bg-white text-green-700 px-3 py-1 rounded-full font-bold hover:bg-green-100 transition shadow flex items-center gap-1">⬇️ App</button>
     </div>
 </header>
