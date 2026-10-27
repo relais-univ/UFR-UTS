@@ -1068,7 +1068,30 @@ function showIOSGuide() {
         </div>`;
     document.body.appendChild(guide);
 }
+// ========== PARTAGE ==========
+async function shareApp() {
+    const shareData = {
+        title: 'UTS Social',
+        text: 'Rejoins-moi sur UTS Social ! 🎓 L\'application des étudiants de l\'UTS : cours, amis, vidéos et actus.',
+        url: window.location.href
+    };
 
+    try {
+        // Si le navigateur supporte le partage natif (Android, iOS, PC récent)
+        if (navigator.share) {
+            await navigator.share(shareData);
+        } else {
+            // Sinon (vieux navigateurs) : on copie le lien
+            await navigator.clipboard.writeText(shareData.text + ' ' + shareData.url);
+            showToast("✅ Lien copié ! Collez-le dans WhatsApp, Xender, etc.");
+        }
+    } catch (err) {
+        // Si l'utilisateur annule, on ne fait rien
+        if (err.name !== 'AbortError') {
+            console.log('Erreur de partage:', err);
+        }
+    }
+}
 // ========== AUTH ==========
 auth.onAuthStateChanged(async (user) => {
     if (!user) await auth.signInAnonymously();
