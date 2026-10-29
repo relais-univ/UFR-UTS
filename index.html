@@ -1137,14 +1137,9 @@ window.onload = () => {
     loadTickerInfos();
     document.addEventListener('visibilitychange', () => { if (!document.hidden) loadTickerInfos(); });
     
-    const lastShown = localStorage.getItem('uts_gemini_popup_shown');
-    const today = new Date().toDateString();
-    if (lastShown !== today) {
-        setTimeout(() => { 
-            showGeminiPopup(); 
-            localStorage.setItem('uts_gemini_popup_shown', today);
-        }, 1500);
-    }
+    setTimeout(() => { 
+    showGeminiPopup(); 
+}, 1500);
 };
 
 Object.assign(window, {
